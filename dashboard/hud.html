@@ -138,16 +138,16 @@ const MOCK_DATA = {
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #03070c;
-    --panel: rgba(8, 22, 34, 0.72);
-    --line: #2a7fa8;
-    --line-dim: #123247;
-    --cyan: #49d3ff;
-    --blue: #1f73e0;
-    --text: #d6f3ff;
-    --muted: #6f9db5;
+    --bg: #0b0203;
+    --panel: rgba(34, 6, 9, 0.72);
+    --line: #a8323c;
+    --line-dim: #3f1217;
+    --accent: #ff3b47;
+    --accent-deep: #b3121f;
+    --text: #ffe4e4;
+    --muted: #b88a8e;
     --pos: #3fe3a2;
-    --neg: #ff5f6d;
+    --neg: #ff6bd5;          /* magenta, so losses stand apart from the red theme */
     --warn: #ffb547;
     --mono: "Share Tech Mono", ui-monospace, Menlo, Consolas, monospace;
     --head: "Rajdhani", "Segoe UI", system-ui, sans-serif;
@@ -157,7 +157,7 @@ const MOCK_DATA = {
   body {
     font-family: var(--mono); font-size: 13px; min-height: 100vh;
     background:
-      radial-gradient(ellipse at 50% 45%, rgba(31,115,224,0.16), transparent 60%),
+      radial-gradient(ellipse at 50% 45%, rgba(179,18,31,0.22), transparent 60%),
       var(--bg);
   }
   .banner {
@@ -176,11 +176,11 @@ const MOCK_DATA = {
     clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 18px 100%, 0 calc(100% - 18px));
   }
   .panel::before {
-    content: ""; position: absolute; left: 0; top: 0; width: 46px; height: 3px; background: var(--cyan);
+    content: ""; position: absolute; left: 0; top: 0; width: 46px; height: 3px; background: var(--accent);
   }
   .panel h2 {
     margin: 0 0 12px; font-family: var(--head); font-weight: 700; font-size: 14px;
-    letter-spacing: .28em; color: var(--cyan);
+    letter-spacing: .28em; color: var(--accent);
   }
   .hud > * { min-width: 0; }
   .diag { grid-area: diag; } .risk { grid-area: risk; } .inst { grid-area: inst; }
@@ -191,27 +191,27 @@ const MOCK_DATA = {
   .row > span:last-child { text-align: right; margin-left: auto; }
   .row .k { color: var(--muted); }
   .meter { height: 6px; background: var(--line-dim); margin: 2px 0 8px; position: relative; }
-  .meter > i { position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, var(--blue), var(--cyan)); }
+  .meter > i { position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, var(--accent-deep), var(--accent)); }
   .meter.warn > i { background: linear-gradient(90deg, #b9741a, var(--warn)); }
   .ticks { display: flex; gap: 3px; height: 56px; align-items: flex-end; margin: 8px 0 4px; }
-  .ticks i { flex: 1; background: var(--cyan); opacity: .85; }
+  .ticks i { flex: 1; background: var(--accent); opacity: .85; }
   .ticks i.off { background: var(--line-dim); opacity: 1; }
   .pos { color: var(--pos); } .neg { color: var(--neg); } .warnc { color: var(--warn); } .mut { color: var(--muted); }
 
   .bigbar { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; margin-bottom: 10px; }
   .bigbar .track { height: 22px; border: 1px solid var(--line); position: relative; background: rgba(0,0,0,.3); }
-  .bigbar .track > i { position: absolute; inset: 2px auto 2px 2px; background: var(--blue); }
+  .bigbar .track > i { position: absolute; inset: 2px auto 2px 2px; background: var(--accent-deep); }
   .bigbar .pct { font-family: var(--head); font-weight: 700; font-size: 22px; min-width: 64px; text-align: right; }
   .bigbar .lab { grid-column: 1 / -1; color: var(--muted); font-size: 11px; letter-spacing: .12em; margin-top: -6px; }
 
   .card {
-    border: 1px solid var(--line-dim); border-left: 3px solid var(--cyan); padding: 8px 10px; margin-bottom: 10px;
+    border: 1px solid var(--line-dim); border-left: 3px solid var(--accent); padding: 8px 10px; margin-bottom: 10px;
     background: rgba(0,0,0,.25);
   }
   .card.off { border-left-color: var(--line-dim); opacity: .55; }
   .card .top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
   .card .sym { font-family: var(--head); font-weight: 700; font-size: 18px; letter-spacing: .08em; }
-  .card .px { font-family: var(--head); font-weight: 700; font-size: 22px; color: var(--cyan); }
+  .card .px { font-family: var(--head); font-weight: 700; font-size: 22px; color: var(--accent); }
   .card .sub { color: var(--muted); font-size: 11px; letter-spacing: .08em; }
   .chip { display: inline-block; padding: 1px 6px; border: 1px solid currentColor; font-size: 11px; letter-spacing: .1em; }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 14px; margin-top: 6px; font-size: 12px; }
@@ -224,7 +224,7 @@ const MOCK_DATA = {
 
   table { width: 100%; border-collapse: collapse; font-size: 12px; }
   th { text-align: left; color: var(--muted); font-weight: normal; letter-spacing: .1em; border-bottom: 1px solid var(--line-dim); padding: 4px 6px 4px 0; }
-  td { white-space: nowrap; padding: 5px 6px 5px 0; border-bottom: 1px solid rgba(18,50,71,.5); }
+  td { white-space: nowrap; padding: 5px 6px 5px 0; border-bottom: 1px solid rgba(63,18,23,.6); }
   .tablewrap { overflow-x: auto; }
 
   svg text { font-family: var(--mono); }
@@ -291,7 +291,7 @@ const MOCK_DATA = {
   /* ---------- risk ---------- */
   const r = D.risk;
   const big = (f, label, warnAt) => {
-    const color = f >= warnAt ? "var(--warn)" : "var(--blue)";
+    const color = f >= warnAt ? "var(--warn)" : "var(--accent-deep)";
     return `<div class="bigbar"><div class="track"><i style="width:calc(${(clamp(f) * 100).toFixed(1)}% - 4px);background:${color}"></i></div>
       <div class="pct">${Math.round(f * 100)}%</div><div class="lab">${label}</div></div>`;
   };
@@ -366,13 +366,13 @@ const MOCK_DATA = {
     return `M${x0} ${y0} A${r} ${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1} ${y1}`;
   };
   const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
-  const CY = css("--cyan"), BL = css("--blue"), DIM = css("--line-dim"), LN = css("--line"),
+  const CY = css("--accent"), BL = css("--accent-deep"), DIM = css("--line-dim"), LN = css("--line"),
         POS = css("--pos"), NEG = css("--neg"), WARN = css("--warn"), MUT = css("--muted"), TX = css("--text");
 
   const defs = el("defs", {});
   defs.innerHTML = `<radialGradient id="g" cx="50%" cy="45%" r="60%">
-      <stop offset="0" stop-color="#bfe9ff" stop-opacity=".55"/><stop offset=".35" stop-color="#2a6f9a" stop-opacity=".35"/>
-      <stop offset="1" stop-color="#03070c" stop-opacity="0"/></radialGradient>`;
+      <stop offset="0" stop-color="#ffc2c2" stop-opacity=".55"/><stop offset=".35" stop-color="#8a1a24" stop-opacity=".35"/>
+      <stop offset="1" stop-color="#0b0203" stop-opacity="0"/></radialGradient>`;
 
   // outer tick ring: 120 ticks, every 10th long
   el("circle", { cx: C, cy: C, r: 300, fill: "none", stroke: LN, "stroke-width": 1 });
@@ -400,11 +400,11 @@ const MOCK_DATA = {
   pnl.forEach((v, i) => {
     const deg = i * 15 + 7.5, len = 4 + 38 * Math.abs(v) / maxAbs;
     const [x0, y0] = pt(190, deg), [x1, y1] = pt(190 + len, deg);
-    el("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: v > 0 ? CY : v < 0 ? NEG : DIM, "stroke-width": 9 });
+    el("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: v > 0 ? POS : v < 0 ? NEG : DIM, "stroke-width": 9 });
   });
   el("circle", { cx: C, cy: C, r: 184, fill: "none", stroke: LN, "stroke-width": 1, "stroke-dasharray": "2 5" });
 
-  // instrument segments ring (enabled = cyan, off = dim)
+  // instrument segments ring (enabled = accent, off = dim)
   const n = D.instruments.length, seg = 360 / n;
   D.instruments.forEach((x, i) => {
     const a = i * seg + 4, b2 = (i + 1) * seg - 4;
@@ -429,7 +429,7 @@ const MOCK_DATA = {
   // status hexagons (top-left of the core, like the reference)
   const hex = (cx, cy, label, on) => {
     const pts = Array.from({ length: 6 }, (_, i) => { const t2 = (60 * i - 30) * Math.PI / 180; return `${cx + 20 * Math.cos(t2)},${cy + 20 * Math.sin(t2)}`; }).join(" ");
-    el("polygon", { points: pts, fill: "rgba(8,22,34,.9)", stroke: on ? CY : DIM, "stroke-width": 2 });
+    el("polygon", { points: pts, fill: "rgba(34,6,9,.9)", stroke: on ? CY : DIM, "stroke-width": 2 });
     el("text", { x: cx, y: cy + 4, "text-anchor": "middle", fill: on ? CY : MUT, "font-size": 9 }, label);
   };
   hex(26, -34, "EQ", D.market.equitiesOpen);
@@ -443,7 +443,7 @@ const MOCK_DATA = {
      `REALIZED ${sgnUsd(a.realizedToday)} · ${a.tradesToday} TRADES · ${a.winsToday}W ${a.lossesToday}L`);
 
   $("legend").innerHTML =
-    `<span><b style="background:${CY}"></b>HOURLY P&amp;L +</span><span><b style="background:${NEG}"></b>HOURLY P&amp;L −</span>` +
+    `<span><b style="background:${POS}"></b>HOURLY P&amp;L +</span><span><b style="background:${NEG}"></b>HOURLY P&amp;L −</span>` +
     `<span><b style="background:${BL}"></b>GROSS EXPOSURE</span><span><b style="background:${WARN}"></b>DAILY LOSS USED</span>`;
 })();
 </script>
