@@ -28,7 +28,13 @@ const MOCK_DATA = {
     startEquityToday: 100000.00,
     dayPnl: 412.75,
     dayPnlPct: 0.0041275,
-    realizedToday: 412.75,
+    realizedToday: 412.75,          // gross: trade P&L before crypto fees
+    feesToday: 98.50,               // crypto fees (rate x notional per fill; Alpaca takes them from the asset)
+    netRealizedToday: 314.25,       // realizedToday - feesToday
+    feesTotal: 98.50,               // all crypto fees since the account opened
+    feeRate: 0.0025,                // per fill, fraction of notional
+    fillsToday: 2,
+    cryptoVolumeToday: 39400,
     tradesToday: 1,
     winsToday: 1,
     lossesToday: 0,
@@ -84,14 +90,14 @@ const MOCK_DATA = {
       enabled: true, price: 60754.37, changePct24h: 0.0062, side: "FLAT", qty: 0,
       signal: "HOLD", reason: "NO BREAKOUT", nextSignal: "03:00 UTC",
       indicators: { high20: 61571.02, low20: 58652.32, volRatio: 0.23, atr: 520.23 },
-      backtest: { trades: 40, winRate: 0.475, sharpe: 1.64, ret: 0.0399, maxDD: -0.0154 },
+      backtest: { trades: 40, winRate: 0.25, sharpe: -0.42, ret: -0.011, maxDD: -0.0357, fees: 4995, retBeforeFees: 0.0399 },
     },
     {
       symbol: "GLD", strategy: "TREND FOLLOWING", timeframe: "4H", session: "US HOURS",
       enabled: true, price: 241.86, changePct24h: -0.0031, side: "FLAT", qty: 0,
       signal: "WAIT", reason: "MARKET CLOSED", nextSignal: "09:30 ET",
       indicators: { emaFast: 243.10, emaSlow: 246.92, atr: 3.41 },
-      backtest: { trades: 2, winRate: 0.50, sharpe: 0.94, ret: 0.0283, maxDD: -0.0196 },
+      backtest: { trades: 2, winRate: 0.50, sharpe: 0.94, ret: 0.0283, maxDD: -0.0196, fees: 0 },
     },
     {
       symbol: "SPY", strategy: "MEAN REVERSION", timeframe: "15M", session: "US HOURS",
@@ -116,11 +122,12 @@ const MOCK_DATA = {
   backtest: {
     window: "2026-05-24 → 2026-11-23",
     config: "BTC/USD + GLD",
-    startEquity: 100000, endEquity: 106906,
-    ret: 0.0691, sharpe: 1.76, maxDD: -0.0201, maxDDUsd: -2194,
-    trades: 42, winRate: 0.476, profitFactor: 2.28, avgWin: 615, avgLoss: -245,
-    hardStops: 1, dailyHalts: 0, sharpeFirstHalf: 2.51, sharpeSecondHalf: 1.54,
-    previous: { config: "ALL FIVE", ret: -0.1214, sharpe: -1.92, maxDD: -0.1309, trades: 319 },
+    startEquity: 100000, endEquity: 101682,
+    ret: 0.0168, sharpe: 0.46, maxDD: -0.0357, maxDDUsd: -3578,
+    trades: 42, winRate: 0.262, profitFactor: 1.20, avgWin: 933, avgLoss: -277,
+    hardStops: 1, dailyHalts: 0, sharpeFirstHalf: 0.48, sharpeSecondHalf: 0.49,
+    fees: 5007, retBeforeFees: 0.0691, feeRate: 0.0025,   // all returns are after crypto fees
+    previous: { config: "ALL FIVE", ret: -0.16, sharpe: -2.6, maxDD: -0.1691, trades: 319, fees: 4086 },
   },
 
   // Last 24 hours, oldest first (hour buckets, New York time).
@@ -129,7 +136,7 @@ const MOCK_DATA = {
                    100035, 100015, 100075, 100185, 100140, 100220, 100220, 100275, 100245, 100315, 100355, 100412.75],
 
   recentTrades: [
-    { time: "01:00 UTC", symbol: "BTC/USD", side: "LONG", entry: 60120.00, exit: 60755.00, qty: 0.65, pnl: 412.75, reason: "TRAILING STOP" },
+    { time: "01:00 UTC", symbol: "BTC/USD", side: "LONG", entry: 60120.00, exit: 60755.00, qty: 0.65, pnl: 412.75, fee: 98.50, netPnl: 314.25, reason: "TRAILING STOP" },
   ],
 };
 </script>
@@ -193,6 +200,7 @@ const MOCK_DATA = {
   .row { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; flex-wrap: wrap; }
   .row > span:last-child { text-align: right; margin-left: auto; }
   .row .k { color: var(--muted); }
+  .sep { margin: 10px 0 4px; padding-top: 8px; border-top: 1px solid var(--line-dim); color: var(--accent); font-size: 11px; letter-spacing: .12em; }
   .meter { height: 6px; background: var(--line-dim); margin: 2px 0 8px; position: relative; }
   .meter > i { position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, var(--accent-deep), var(--accent)); }
   .meter.warn > i { background: linear-gradient(90deg, #b9741a, var(--warn)); }
@@ -299,7 +307,7 @@ function render(D, first) {
     row("SLOWEST", slowest ? `${slowest.name.toUpperCase()} ${slowest.ms} ms` : "—", slowest && slowest.ms > 500 ? "warnc" : "");
 
   /* ---------- risk ---------- */
-  const r = D.risk;
+  const r = D.risk, A = D.account;
   const big = (f, label, warnAt) => {
     const color = f >= warnAt ? "var(--warn)" : "var(--accent-deep)";
     return `<div class="bigbar"><div class="track"><i style="width:calc(${(clamp(f) * 100).toFixed(1)}% - 4px);background:${color}"></i></div>
@@ -313,7 +321,13 @@ function render(D, first) {
     row("MAX PER SYMBOL", `${r.maxAllocPerSymbol.toFixed(1)}x EQUITY`) +
     row("BROKER STOPS LIVE", r.brokerStopsLive) +
     row("CORRELATION BLOCKS", r.correlationBlocksToday) +
-    row("TRADING", r.halted ? "HALTED" : "ACTIVE", r.halted ? "neg" : "pos");
+    row("TRADING", r.halted ? "HALTED" : "ACTIVE", r.halted ? "neg" : "pos") +
+    `<div class="sep">FEES · CRYPTO ${(A.feeRate * 100).toFixed(2)}% PER FILL · STOCKS $0</div>` +
+    row("REALIZED TODAY (GROSS)", sgnUsd(A.realizedToday), cls(A.realizedToday)) +
+    row("FEES TODAY", `${usd(-A.feesToday)} · ${A.fillsToday} FILLS`, A.feesToday ? "neg" : "") +
+    row("NET REALIZED TODAY", sgnUsd(A.netRealizedToday), cls(A.netRealizedToday)) +
+    row("CRYPTO VOLUME TODAY", usd(A.cryptoVolumeToday, 0)) +
+    row("FEES ALL-TIME", usd(-A.feesTotal), A.feesTotal ? "neg" : "");
 
   /* ---------- instruments ---------- */
   $("inst").innerHTML = D.instruments.map((x) => {
@@ -332,9 +346,12 @@ function render(D, first) {
       <div class="grid2">
         <span class="mut">POSITION</span><span>${x.side}${x.qty ? " " + x.qty : ""}</span>
         ${x.unrealizedPl != null ? `<span class="mut">UNREALIZED</span><span class="${cls(x.unrealizedPl)}">${sgnUsd(x.unrealizedPl)}</span>` : ""}
+        ${x.exitFeeEst != null ? `<span class="mut">EXIT FEE (EST)</span><span class="neg">${usd(-x.exitFeeEst)}</span>
+          <span class="mut">NET IF CLOSED</span><span class="${cls(x.unrealizedPl - x.exitFeeEst)}">${sgnUsd(x.unrealizedPl - x.exitFeeEst)}</span>` : ""}
         ${ind}
         <span class="mut">BT SHARPE</span><span class="${cls(bt.sharpe)}">${bt.sharpe.toFixed(2)}</span>
-        <span class="mut">BT RETURN</span><span class="${cls(bt.ret)}">${pct(bt.ret)}</span>
+        <span class="mut">BT RETURN</span><span class="${cls(bt.ret)}">${pct(bt.ret)}${bt.retBeforeFees != null ? ` <span class="mut">(${pct(bt.retBeforeFees)} PRE-FEE)</span>` : ""}</span>
+        ${bt.fees ? `<span class="mut">BT FEES</span><span class="neg">${usd(-bt.fees, 0)}</span>` : ""}
         <span class="mut">BT TRADES</span><span>${bt.trades} · ${(bt.winRate * 100).toFixed(0)}% WIN</span>
       </div></div>`;
   }).join("");
@@ -342,16 +359,18 @@ function render(D, first) {
   /* ---------- trades ---------- */
   const t = D.recentTrades;
   $("trades").innerHTML = t.length ? `<div class="tablewrap"><table>
-      <tr><th>TIME</th><th>SYMBOL</th><th>SIDE</th><th>ENTRY</th><th>EXIT</th><th>QTY</th><th>P&amp;L</th><th>EXIT REASON</th></tr>
+      <tr><th>TIME</th><th>SYMBOL</th><th>SIDE</th><th>ENTRY</th><th>EXIT</th><th>QTY</th><th>GROSS P&amp;L</th><th>FEES</th><th>NET P&amp;L</th><th>EXIT REASON</th></tr>
       ${t.map((x) => `<tr><td>${x.time}</td><td>${x.symbol}</td><td>${x.side}</td><td>${usd(x.entry)}</td>
-        <td>${usd(x.exit)}</td><td>${x.qty}</td><td class="${cls(x.pnl)}">${sgnUsd(x.pnl)}</td><td>${x.reason}</td></tr>`).join("")}
+        <td>${usd(x.exit)}</td><td>${x.qty}</td><td class="${cls(x.pnl)}">${sgnUsd(x.pnl)}</td>
+        <td class="${x.fee ? "neg" : "mut"}">${usd(-(x.fee || 0))}</td>
+        <td class="${cls(x.netPnl ?? x.pnl)}">${sgnUsd(x.netPnl ?? x.pnl)}</td><td>${x.reason}</td></tr>`).join("")}
     </table></div>` : `<div class="mut">NO TRADES YET</div>`;
 
   /* ---------- backtest ---------- */
   const k = D.backtest, p = k && k.previous;
   const stat = (v, l, prev, c = "") => `<div class="stat"><div class="v ${c}">${v}</div><div class="l">${l}</div>${prev ? `<div class="p">${prev}</div>` : ""}</div>`;
   $("bt").innerHTML = !k ? `<div class="mut">NO BACKTEST STATS: RUN update_hud.py --backtest</div>` :
-    `<div class="row" style="margin-bottom:10px"><span class="k">${k.window} · ${k.config}</span><span class="mut">PREVIOUS: ${p.config}</span></div>
+    `<div class="row" style="margin-bottom:10px"><span class="k">${k.window} · ${k.config} · AFTER ${((k.feeRate || 0) * 100).toFixed(2)}% CRYPTO FEES</span><span class="mut">PREVIOUS: ${p.config}</span></div>
     <div class="stats">
       ${stat(pct(k.ret), "RETURN", `WAS ${pct(p.ret)}`, cls(k.ret))}
       ${stat(k.sharpe.toFixed(2), "SHARPE", `WAS ${p.sharpe.toFixed(2)}`, cls(k.sharpe))}
@@ -362,6 +381,7 @@ function render(D, first) {
       ${stat(k.profitFactor.toFixed(2), "PROFIT FACTOR", `AVG ${usd(k.avgWin, 0)} / ${usd(k.avgLoss, 0)}`)}
       ${stat(`${k.sharpeFirstHalf.toFixed(2)} / ${k.sharpeSecondHalf.toFixed(2)}`, "SHARPE H1 / H2")}
       ${stat(k.hardStops, "HARD STOPS", `${k.dailyHalts} DAILY HALTS`)}
+      ${k.fees != null ? stat(usd(-k.fees, 0), "FEES PAID", `RETURN BEFORE FEES ${pct(k.retBeforeFees)}`, "neg") : ""}
     </div>`;
 
   /* ---------- central core (SVG) ---------- */
@@ -509,6 +529,8 @@ function render(D, first) {
      D.market.equitiesOpen ? `EQUITIES OPEN · CLOSE ${D.market.nextClose}` : `EQUITIES CLOSED · OPEN ${D.market.nextOpen}`);
   el("text", { x: C, y: 690, "text-anchor": "middle", fill: MUT, "font-size": 10, "letter-spacing": 2 },
      `REALIZED ${sgnUsd(a.realizedToday)} · ${a.tradesToday} TRADES · ${a.winsToday}W ${a.lossesToday}L`);
+  el("text", { x: C, y: 706, "text-anchor": "middle", fill: (a.netRealizedToday ?? 0) >= 0 ? POS : NEG, "font-size": 10, "letter-spacing": 2 },
+     `FEES ${usd(-(a.feesToday || 0))} · NET ${sgnUsd(a.netRealizedToday ?? a.realizedToday)}`);
 
   $("legend").innerHTML =
     `<span><b style="background:${POS}"></b>HOURLY P&amp;L +</span><span><b style="background:${NEG}"></b>HOURLY P&amp;L −</span>` +

@@ -11,7 +11,8 @@ the 14-day sizing ATR. Extra history before the window is fetched so indicators 
 
 Simulation (event-driven, same strategy classes and risk_manager as the live bot):
   * Signals are judged on CLOSED bars and filled at the NEXT bar's open (no look-ahead).
-  * Slippage 0.05% against you on every fill (entries, exits, stops); commission $0.
+  * Slippage 0.05% against you on every fill (entries, exits, stops); commission $0 on stocks.
+  * Crypto fee 0.25% of notional per fill (Alpaca's base-tier taker fee; CRYPTO_FEE_RATE overrides).
   * Equities: signals only on bars that close during regular hours (9:30-16:00 ET), and
     orders fill only at the open of a bar inside regular hours. A signal at the close
     waits for the next session, so overnight gaps are realistic. BTC/USD trades 24/7.
@@ -43,11 +44,12 @@ import pandas as pd
 
 from bot import risk_manager as risk
 from bot.strategies import FLAT, LONG, SHORT, Action, Context, atr
-from config import CORRELATION_RULES, INSTRUMENTS, Instrument, Settings, project_path
+from config import CORRELATION_RULES, CRYPTO_FEE_RATE, INSTRUMENTS, Instrument, Settings, project_path
 
 NY = ZoneInfo("America/New_York")
 SLIPPAGE = 0.0005      # 0.05% per fill
-COMMISSION = 0.0       # Alpaca is commission-free
+COMMISSION = 0.0       # Alpaca stocks are commission-free
+CRYPTO_FEE = CRYPTO_FEE_RATE   # fraction of notional per crypto fill (config.CRYPTO_FEE_RATE)
 CAPITAL = 100_000.0
 RTH_OPEN, RTH_CLOSE = dtime(9, 30), dtime(16, 0)
 
@@ -142,6 +144,7 @@ class Pos:
     entry_equity: float = 0.0
     extreme: float | None = None
     hard: float | None = None
+    entry_fee: float = 0.0
 
 
 class _Inst:
@@ -173,9 +176,10 @@ class _Inst:
 class Simulator:
     def __init__(self, s: Settings, instruments: list[Instrument], data: dict[str, MarketData],
                  start: datetime, capital: float = CAPITAL, rules=(), slippage: float = SLIPPAGE,
-                 commission: float = COMMISSION):
+                 commission: float = COMMISSION, crypto_fee: float = CRYPTO_FEE):
         self.s, self.start, self.capital, self.rules = s, pd.Timestamp(start), capital, list(rules)
-        self.slip, self.commission = slippage, commission
+        self.slip, self.commission, self.crypto_fee = slippage, commission, crypto_fee
+        self.fees = 0.0          # crypto fees paid
         self.inst = {i.key: _Inst(i, data[i.key], s) for i in instruments}
         gated = {b for _, b in self.rules}
         self.order = {k: (1 if k in gated else 0) for k in self.inst}  # gated symbols go last
@@ -218,9 +222,11 @@ class Simulator:
         qty, _ = risk.position_size(eq, budget, px, a, self.s, fractional=fractional)
         if qty <= 0:
             return
-        self.cash -= side * qty * px + self.commission
+        fee = qty * px * self.crypto_fee if I.inst.is_crypto else 0.0
+        self.fees += fee
+        self.cash -= side * qty * px + self.commission + fee
         self.pos[k] = Pos(side, qty, px, ts, eq, px,
-                          risk.hard_stop_price(side, px, qty, eq, self.s.hard_stop_pct))
+                          risk.hard_stop_price(side, px, qty, eq, self.s.hard_stop_pct), fee)
         self.last_entry_bar[k] = signal_bar
 
     def _close(self, k: str, raw: float, ts, reason: str):
@@ -228,8 +234,10 @@ class Simulator:
         if p.side == FLAT:
             return
         px = self._fill(raw, buying=p.side == SHORT)
-        self.cash += p.side * p.qty * px - self.commission
-        pnl = (px - p.entry) * p.qty * p.side - 2 * self.commission
+        fee = p.qty * px * self.crypto_fee if self.inst[k].inst.is_crypto else 0.0
+        self.fees += fee
+        self.cash += p.side * p.qty * px - self.commission - fee
+        pnl = (px - p.entry) * p.qty * p.side - 2 * self.commission - p.entry_fee - fee
         self.trades.append(Trade(self.inst[k].inst.symbol, "LONG" if p.side == LONG else "SHORT",
                                  p.entry_time, ts, p.entry, px, p.qty, pnl, reason))
         self.pos[k] = Pos()
@@ -352,6 +360,7 @@ def metrics(sim: Simulator, annualization: int, bh_return: float | None = None) 
         "total_return": float(curve.iloc[-1] / sim.capital - 1),
         "final_equity": float(curve.iloc[-1]),
         "hard_stops": sim.hard_stops,
+        "fees": getattr(sim, "fees", 0.0),
         "buy_hold": bh_return,
         "curve": curve,
         "drawdown": dd,
@@ -471,7 +480,7 @@ def plot(results: dict[str, dict], portfolio: dict, path: str, title_note: str =
     fig.legend(handles=handles, loc="lower left", bbox_to_anchor=(0.06, 0.452), ncol=2,
                frameon=False, fontsize=9)
     fig.suptitle("Backtest results" + title_note, x=0.06, y=0.978, ha="left", fontsize=15, weight="bold")
-    fig.text(0.06, 0.947, "Fills at next bar open · 0.05% slippage per fill · $0 commission · "
+    fig.text(0.06, 0.947, f"Fills at next bar open · 0.05% slippage per fill · $0 stock commission · {CRYPTO_FEE:.2%} crypto fee per fill · "
              "ATR sizing (1 daily ATR = 1% equity) · 1% hard stops · equities in regular hours only",
              color=INK2, fontsize=9.5)
     fig.savefig(path, dpi=150, facecolor=SURFACE, bbox_inches="tight")
@@ -560,7 +569,7 @@ def main():
     ps = portfolio["sim"]
     print(f"\nPortfolio: ${CAPITAL:,.0f} -> ${portfolio['final_equity']:,.0f} | max drawdown "
           f"${portfolio['max_drawdown_usd']:,.0f} ({portfolio['max_drawdown']:.2%}) | "
-          f"hard stops {ps.hard_stops} | daily-loss halts {ps.daily_halts} | "
+          f"hard stops {ps.hard_stops} | daily-loss halts {ps.daily_halts} | crypto fees ${ps.fees:,.0f} | "
           f"BTC entries blocked by correlation filter: {ps.blocked}")
     print("Per instrument: each on its own $100k account with the same risk rules (no correlation filter).")
     print("Sharpe: daily returns, rf = 0, annualized x sqrt(252) for equities, sqrt(365) for BTC/portfolio.")

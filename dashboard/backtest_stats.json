@@ -1,77 +1,93 @@
 {
  "window": "2026-05-24 \u2192 2026-11-23",
- "computedUtc": "2026-11-23 11:35",
+ "computedUtc": "2026-11-23 23:45",
  "instruments": {
   "SPY": {
    "trades": 163,
    "winRate": 0.4908,
    "sharpe": -3.98,
    "ret": -0.1127,
-   "maxDD": -0.1186
+   "maxDD": -0.1186,
+   "fees": 0.0,
+   "retBeforeFees": null
   },
   "QQQ": {
    "trades": 118,
    "winRate": 0.5932,
    "sharpe": -1.21,
    "ret": -0.0377,
-   "maxDD": -0.0562
+   "maxDD": -0.0562,
+   "fees": 0.0,
+   "retBeforeFees": null
   },
   "BTC/USD": {
    "trades": 40,
-   "winRate": 0.475,
-   "sharpe": 1.64,
-   "ret": 0.0399,
-   "maxDD": -0.0154
+   "winRate": 0.25,
+   "sharpe": -0.42,
+   "ret": -0.011,
+   "maxDD": -0.0357,
+   "fees": 4995.0,
+   "retBeforeFees": 0.0399
   },
   "GLD": {
    "trades": 2,
    "winRate": 0.5,
    "sharpe": 0.94,
    "ret": 0.0283,
-   "maxDD": -0.0196
+   "maxDD": -0.0196,
+   "fees": 0.0,
+   "retBeforeFees": null
   },
   "USO": {
    "trades": 2,
    "winRate": 0.0,
    "sharpe": -0.99,
    "ret": -0.0187,
-   "maxDD": -0.0258
+   "maxDD": -0.0258,
+   "fees": 0.0,
+   "retBeforeFees": null
   }
  },
  "enabled": {
   "config": "BTC/USD + GLD",
   "trades": 42,
-  "winRate": 0.4762,
-  "sharpe": 1.76,
-  "ret": 0.0691,
-  "maxDD": -0.0201,
+  "winRate": 0.2619,
+  "sharpe": 0.46,
+  "ret": 0.0168,
+  "maxDD": -0.0357,
+  "fees": 5007.0,
   "startEquity": 100000.0,
-  "endEquity": 106906.0,
-  "maxDDUsd": -2194.0,
-  "profitFactor": 2.28,
-  "avgWin": 615.0,
-  "avgLoss": -245.0,
+  "endEquity": 101682.0,
+  "maxDDUsd": -3578.0,
+  "profitFactor": 1.2,
+  "avgWin": 933.0,
+  "avgLoss": -277.0,
   "hardStops": 1,
   "dailyHalts": 0,
-  "sharpeFirstHalf": 2.51,
-  "sharpeSecondHalf": 1.54
+  "sharpeFirstHalf": 0.82,
+  "sharpeSecondHalf": 0.32,
+  "retBeforeFees": 0.0691,
+  "feeRate": 0.0025
  },
  "allFive": {
   "config": "ALL FIVE",
   "trades": 319,
-  "winRate": 0.5141,
-  "sharpe": -1.92,
-  "ret": -0.1214,
-  "maxDD": -0.1309,
+  "winRate": 0.4922,
+  "sharpe": -2.6,
+  "ret": -0.16,
+  "maxDD": -0.1691,
+  "fees": 4086.0,
   "startEquity": 100000.0,
-  "endEquity": 87862.0,
-  "maxDDUsd": -13169.0,
-  "profitFactor": 0.76,
-  "avgWin": 232.0,
-  "avgLoss": -324.0,
+  "endEquity": 83999.0,
+  "maxDDUsd": -17012.0,
+  "profitFactor": 0.69,
+  "avgWin": 230.0,
+  "avgLoss": -322.0,
   "hardStops": 21,
   "dailyHalts": 1,
-  "sharpeFirstHalf": -1.22,
-  "sharpeSecondHalf": -2.61
+  "sharpeFirstHalf": -1.55,
+  "sharpeSecondHalf": -3.66,
+  "retBeforeFees": -0.1214,
+  "feeRate": 0.0025
  }
 }

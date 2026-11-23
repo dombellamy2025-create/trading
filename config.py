@@ -53,6 +53,9 @@ class Instrument:
 
 ALLOW_SHORT = _env("ALLOW_SHORT", True, bool)
 MR_STOP_STD = _env("MR_STOP_STD", 0.0, float)  # optional mean-reversion stop, 0 = off
+# Alpaca crypto trading fee per fill, as a fraction of notional (base tier: 0.25% taker, 0.15% maker).
+# Taken out of the asset received, so it shows in equity but not in fill prices. Stocks: commission-free.
+CRYPTO_FEE_RATE = _env("CRYPTO_FEE_RATE", 0.0025, float)
 
 ALL_INSTRUMENTS: list[Instrument] = [
     # Strategy 1: mean reversion, 15-min bars, 20-period SMA / std-dev

@@ -33,7 +33,7 @@ sys.path.insert(0, str(ROOT))
 import pandas as pd  # noqa: E402
 
 from bot.broker import AlpacaBroker  # noqa: E402
-from config import ALL_INSTRUMENTS, ENABLED_SYMBOLS, INSTRUMENTS, Settings  # noqa: E402
+from config import ALL_INSTRUMENTS, CRYPTO_FEE_RATE, ENABLED_SYMBOLS, INSTRUMENTS, Settings  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 ET = ZoneInfo("America/New_York")
@@ -111,6 +111,27 @@ def next_bar_close(minutes: int, now: datetime, delay_s: int) -> datetime:
     return datetime.fromtimestamp((epoch // step + 1) * step + delay_s, timezone.utc)
 
 
+def crypto_fills(api, max_pages=20) -> list[dict]:
+    """All crypto FILL activities: {time, symbol, side, qty, price, notional, fee}.
+
+    Alpaca takes the crypto fee out of the asset received (BTC on a buy, USD on a sell), so it never
+    appears in the fill price or the bot's trade log; it is CRYPTO_FEE_RATE x notional per fill."""
+    out, token = [], None
+    for _ in range(max_pages):
+        page = api.get_activities(activity_types="FILL", page_size=100, page_token=token, direction="desc")
+        for a in page:
+            d = a._raw
+            if "/" not in str(d.get("symbol", "")):
+                continue
+            notional = float(d["qty"]) * float(d["price"])
+            out.append({"time": pd.Timestamp(d["transaction_time"]), "symbol": d["symbol"], "side": d["side"],
+                        "notional": notional, "fee": notional * CRYPTO_FEE_RATE})
+        if len(page) < 100:
+            break
+        token = page[-1]._raw["id"]
+    return out
+
+
 # ---------------------------------------------------------------- backtest stats
 def build_backtest_stats(s: Settings) -> dict:
     """Per-instrument stats for every strategy, plus the enabled and the all-five portfolios."""
@@ -125,12 +146,17 @@ def build_backtest_stats(s: Settings) -> dict:
 
     def summary(m):
         return {"trades": m["trades"], "winRate": r2(m["win_rate"], 4), "sharpe": r2(m["sharpe"]),
-                "ret": r2(m["total_return"], 4), "maxDD": r2(m["max_drawdown"], 4)}
+                "ret": r2(m["total_return"], 4), "maxDD": r2(m["max_drawdown"], 4), "fees": r2(m["fees"], 0)}
+
+    def ret_before_fees(insts, rules=()):
+        sim = bt.Simulator(s, insts, {i.key: data[i.key] for i in insts}, start, rules=rules, crypto_fee=0.0).run()
+        return r2(sim.equity() / bt.CAPITAL - 1, 4)
 
     per = {}
     for inst in ALL_INSTRUMENTS:
         sim = bt.Simulator(s, [inst], {inst.key: data[inst.key]}, start).run()
-        per[inst.symbol] = summary(bt.metrics(sim, 365 if inst.is_crypto else 252))
+        per[inst.symbol] = summary(bt.metrics(sim, 365 if inst.is_crypto else 252)) | {
+            "retBeforeFees": ret_before_fees([inst]) if inst.is_crypto else None}
 
     def portfolio(insts):
         sim = bt.Simulator(s, insts, data, start, rules=bt.CORRELATION_RULES).run()
@@ -147,6 +173,7 @@ def build_backtest_stats(s: Settings) -> dict:
             "profitFactor": r2(m["profit_factor"]), "avgWin": r2(sum(wins) / len(wins) if wins else 0, 0),
             "avgLoss": r2(sum(losses) / len(losses) if losses else 0, 0), "hardStops": sim.hard_stops,
             "dailyHalts": sim.daily_halts, "sharpeFirstHalf": sh(d[d.index < mid]), "sharpeSecondHalf": sh(d[d.index >= mid]),
+            "retBeforeFees": ret_before_fees(insts, bt.CORRELATION_RULES), "feeRate": CRYPTO_FEE_RATE,
         }
 
     stats = {
@@ -171,6 +198,10 @@ def snapshot(s: Settings, broker: AlpacaBroker) -> dict:
     clock = T("clock", broker.clock)
     positions = T("positions", broker.positions)
     orders = T("orders", broker.open_orders)
+    try:
+        fills = T("fills", crypto_fills, broker.api)
+    except Exception:
+        fills = []
     try:
         hist = T("portfolio history", broker.api.get_portfolio_history, period="1D", timeframe="1H", extended_hours=True)
     except Exception:
@@ -213,6 +244,8 @@ def snapshot(s: Settings, broker: AlpacaBroker) -> dict:
             item["side"] = "LONG" if pos.qty > 0 else "SHORT"
             item["qty"] = r2(abs(pos.qty), 6)
             item["unrealizedPl"] = r2(pos.unrealized_pl)
+            if inst.is_crypto:   # what closing now would cost (Alpaca's unrealized P&L leaves it out)
+                item["exitFeeEst"] = r2(abs(pos.market_value) * CRYPTO_FEE_RATE)
             gross += abs(pos.market_value)
         if enabled:
             item["side"] = item["side"] if pos else "FLAT"
@@ -257,7 +290,7 @@ def snapshot(s: Settings, broker: AlpacaBroker) -> dict:
         e, a5 = bts["enabled"], bts["allFive"]
         backtest = {"window": bts["window"], "config": e["config"], **{k: v for k, v in e.items() if k != "config"},
                     "previous": {"config": a5["config"], "ret": a5["ret"], "sharpe": a5["sharpe"],
-                                 "maxDD": a5["maxDD"], "trades": a5["trades"]}}
+                                 "maxDD": a5["maxDD"], "trades": a5["trades"], "fees": a5.get("fees")}}
     else:
         backtest = None
 
@@ -274,10 +307,24 @@ def snapshot(s: Settings, broker: AlpacaBroker) -> dict:
     if tcsv.exists():
         with open(tcsv) as f:
             for r in list(csv.DictReader(f))[-10:][::-1]:
+                gross = float(r["profit_loss"])
+                fee = 0.0
+                if "/" in r["instrument"]:
+                    # the trade's own fills (entry order .. exit), else rate x both legs
+                    t0 = pd.Timestamp(r["entry_time"]) - timedelta(minutes=2)
+                    t1 = pd.Timestamp(r["timestamp"]) + timedelta(minutes=1)
+                    own = [x["fee"] for x in fills if x["symbol"] == r["instrument"] and t0 <= x["time"] <= t1]
+                    fee = sum(own) if own else CRYPTO_FEE_RATE * float(r["position_size"]) * (
+                        float(r["entry_price"]) + float(r["exit_price"]))
                 trades.append({"time": r["timestamp"][11:16] + " UTC", "symbol": r["instrument"],
                                "side": r["direction"].upper(), "entry": float(r["entry_price"]),
                                "exit": float(r["exit_price"]), "qty": float(r["position_size"]),
-                               "pnl": float(r["profit_loss"]), "reason": r["exit_reason"].upper()})
+                               "pnl": gross, "fee": r2(fee), "netPnl": r2(gross - fee),
+                               "reason": r["exit_reason"].upper()})
+
+    today_et = now_et.date()
+    fees_today = sum(x["fee"] for x in fills if x["time"].astimezone(ET).date() == today_et)
+    fees_total = sum(x["fee"] for x in fills)
 
     day_pnl = acct.equity - acct.last_equity
     lat = [x["ms"] for x in T.samples if x["name"] == "account"]
@@ -289,6 +336,10 @@ def snapshot(s: Settings, broker: AlpacaBroker) -> dict:
                     "buyingPower": r2(acct.buying_power), "startEquityToday": r2(acct.last_equity),
                     "dayPnl": r2(day_pnl), "dayPnlPct": r2(day_pnl / acct.last_equity if acct.last_equity else 0, 6),
                     "realizedToday": r2(daily.get("realized_pnl", 0)), "tradesToday": daily.get("trades", 0),
+                    "feesToday": r2(fees_today), "feesTotal": r2(fees_total), "feeRate": CRYPTO_FEE_RATE,
+                    "netRealizedToday": r2(daily.get("realized_pnl", 0) - fees_today),
+                    "fillsToday": sum(1 for x in fills if x["time"].astimezone(ET).date() == today_et),
+                    "cryptoVolumeToday": r2(sum(x["notional"] for x in fills if x["time"].astimezone(ET).date() == today_et), 0),
                     "winsToday": daily.get("wins", 0), "lossesToday": daily.get("losses", 0),
                     "openPositions": len(positions), "openOrders": len(orders)},
         "market": {"equitiesOpen": clock.is_open, "cryptoOpen": True,

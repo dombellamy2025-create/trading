@@ -4,19 +4,19 @@
     "2026-11-23"
   ],
   "portfolio": {
-    "win_rate": 0.47619047619047616,
+    "win_rate": 0.2619047619047619,
     "trades_per_day": 0.22950819672131148,
-    "daily_return_mean": 0.0003730550191169919,
-    "daily_return_std": 0.004043780905950749,
-    "max_drawdown": -0.02011461629487865,
-    "total_return": 0.06905616393731306
+    "daily_return_mean": 0.0001001217443438491,
+    "daily_return_std": 0.0041416332050166335,
+    "max_drawdown": -0.035682193343483104,
+    "total_return": 0.016815398135962667
   },
   "instruments": {
     "BTC/USD": {
-      "win_rate": 0.475,
+      "win_rate": 0.25,
       "trades_per_day": 0.2185792349726776,
-      "avg_win": 437.0899563523544,
-      "avg_loss": -205.3258855484048
+      "avg_win": 642.4836843023796,
+      "avg_loss": -250.87981445457098
     },
     "GLD": {
       "win_rate": 0.5,

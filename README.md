@@ -175,7 +175,7 @@ first trade; the 200 EMA on 4-hour bars needs months of it.
 live bot:
 - Signals use closed bars and fill at the **next bar's open**, so it never uses information it
   couldn't have had at the time.
-- **0.05% slippage against you on every fill**, entries, exits and stops alike. **$0 commission.**
+- **0.05% slippage against you on every fill**, entries, exits and stops alike. **$0 commission on stocks; 0.25% of notional per crypto fill** (Alpaca's base-tier taker fee, `CRYPTO_FEE_RATE`). Alpaca takes the crypto fee out of the asset received, so it shows in equity but not in fill prices or `trades.csv`; the HUD shows gross P&L, fees and net P&L side by side.
 - Equities only signal and fill during regular hours (9:30–16:00 ET). A signal at the close waits
   for the next open, so overnight gaps are included. BTC/USD trades 24/7.
 - Position sizing uses the daily ATR, with the per-instrument cap, the 2× gross exposure cap, and

@@ -663,7 +663,9 @@ def test_fill_next_bar_open_with_slippage():
     assert t.entry_time == idx[2] and t.entry_price == 100.5 * 1.0005   # next open + 0.05%
     assert t.exit_time == idx[4] and t.exit_price == 102.5 * 0.9995     # next open - 0.05%
     assert t.position_size == 250                                       # 1% of $100k / ATR 4
-    assert abs(t.profit_loss - (t.exit_price - t.entry_price) * 250) < 1e-9
+    fees = 0.0025 * 250 * (t.entry_price + t.exit_price)                # crypto fee on both fills
+    assert abs(t.profit_loss - ((t.exit_price - t.entry_price) * 250 - fees)) < 1e-9
+    assert abs(sim.fees - fees) < 1e-9
 
 
 def test_equity_orders_wait_for_regular_hours():
@@ -695,7 +697,7 @@ def test_hard_stop_normal_fill_near_one_percent():
     md = md_from([100, 100, 100, 97, 97], T0, 60, lows=[99, 99, 99, 95, 96])
     idx = md.bars.index
     inst = Instrument("BTC/USD", AssetClass.CRYPTO, Scripted({idx[1]: Action.LONG}, 60))
-    t = bt.Simulator(sim_settings(), [inst], {"BTCUSD": md}, T0).run().trades[0]
+    t = bt.Simulator(sim_settings(), [inst], {"BTCUSD": md}, T0, crypto_fee=0.0).run().trades[0]
     exit_slip = t.position_size * (t.exit_price / 0.9995) * 0.0005   # 0.05% of exit notional
     assert abs(t.profit_loss - (-1000 - exit_slip)) < 0.01             # 1% of equity + exit slippage
 
