@@ -1,0 +1,12 @@
+.env
+__pycache__/
+*.pyc
+bot_state.json
+logs/
+trades.csv
+daily_pnl.csv
+.venv/
+*.tmp
+.pytest_cache/
+data/
+backtest_trades.csv
