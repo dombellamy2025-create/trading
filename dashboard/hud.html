@@ -354,11 +354,32 @@ const MOCK_DATA = {
 
   /* ---------- central core (SVG) ---------- */
   const NS = "http://www.w3.org/2000/svg", svg = $("core"), C = 320;
-  const el = (tag, attrs, text) => {
+  let layer = svg;                       // where el() appends; swapped to draw into rotating groups
+  const el = (tag, attrs, text, parent = layer) => {
     const e = document.createElementNS(NS, tag);
     for (const a in attrs) e.setAttribute(a, attrs[a]);
     if (text != null) e.textContent = text;
-    svg.appendChild(e); return e;
+    parent.appendChild(e); return e;
+  };
+
+  /* ---------- animation helpers (all skipped when the viewer prefers reduced motion) ---------- */
+  const MOTION = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const group = (draw) => { const g = el("g", {}); const prev = layer; layer = g; draw(); layer = prev; return g; };
+  const spin = (node, seconds, dir = 1) => MOTION && el("animateTransform", {
+    attributeName: "transform", type: "rotate", from: `0 ${C} ${C}`, to: `${360 * dir} ${C} ${C}`,
+    dur: `${seconds}s`, repeatCount: "indefinite" }, null, node);
+  const grow = (line, x0, y0, x1, y1, delay) => {
+    if (!MOTION) return;
+    line.setAttribute("x2", x0); line.setAttribute("y2", y0);
+    for (const [attr, from, to] of [["x2", x0, x1], ["y2", y0, y1]])
+      el("animate", { attributeName: attr, from, to, dur: "0.7s", begin: `${delay}s`, fill: "freeze",
+        calcMode: "spline", keySplines: "0.2 0.8 0.2 1", keyTimes: "0;1" }, null, line);
+  };
+  const drawOn = (path, delay, dur = 1.2) => {
+    if (!MOTION) return;
+    path.setAttribute("pathLength", 1); path.setAttribute("stroke-dasharray", "1 1"); path.setAttribute("stroke-dashoffset", 1);
+    el("animate", { attributeName: "stroke-dashoffset", from: 1, to: 0, dur: `${dur}s`, begin: `${delay}s`, fill: "freeze",
+      calcMode: "spline", keySplines: "0.3 0.7 0.2 1", keyTimes: "0;1" }, null, path);
   };
   const pt = (r, deg) => { const a = (deg - 90) * Math.PI / 180; return [C + r * Math.cos(a), C + r * Math.sin(a)]; };
   const arc = (r, a0, a1) => {
@@ -374,51 +395,85 @@ const MOCK_DATA = {
       <stop offset="0" stop-color="#ffc2c2" stop-opacity=".55"/><stop offset=".35" stop-color="#8a1a24" stop-opacity=".35"/>
       <stop offset="1" stop-color="#0b0203" stop-opacity="0"/></radialGradient>`;
 
-  // outer tick ring: 120 ticks, every 10th long
-  el("circle", { cx: C, cy: C, r: 300, fill: "none", stroke: LN, "stroke-width": 1 });
-  for (let i = 0; i < 120; i++) {
-    const long = i % 10 === 0, [x0, y0] = pt(300, i * 3), [x1, y1] = pt(long ? 280 : 291, i * 3);
-    el("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: long ? CY : LN, "stroke-width": long ? 2 : 1 });
-  }
-  // clock + session marker at top
-  el("text", { x: C, y: -30, "text-anchor": "middle", fill: TX, "font-size": 26, "letter-spacing": 4 }, D.meta.clockEt);
+  // outer tick ring: 120 ticks, every 10th long; turns once every 2 minutes
+  spin(group(() => {
+    el("circle", { cx: C, cy: C, r: 300, fill: "none", stroke: LN, "stroke-width": 1 });
+    for (let i = 0; i < 120; i++) {
+      const long = i % 10 === 0, [x0, y0] = pt(300, i * 3), [x1, y1] = pt(long ? 280 : 291, i * 3);
+      el("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: long ? CY : LN, "stroke-width": long ? 2 : 1 });
+    }
+  }), 120);
+  // fixed north marker over the rotating ring
+  el("path", { d: `M${C - 7} 12 L${C + 7} 12 L${C} 26 Z`, fill: CY });
+  // clock + session marker at top (colon blinks)
+  const [hh, mm] = D.meta.clockEt.split(":");
+  const clock = el("text", { x: C, y: -30, "text-anchor": "middle", fill: TX, "font-size": 26, "letter-spacing": 4 });
+  el("tspan", {}, hh, clock);
+  const colon = el("tspan", {}, ":", clock);
+  el("tspan", {}, mm, clock);
+  if (MOTION) el("animate", { attributeName: "opacity", values: "1;1;0.15;0.15", keyTimes: "0;0.5;0.5;1", dur: "1s", repeatCount: "indefinite" }, null, colon);
   el("text", { x: C, y: -10, "text-anchor": "middle", fill: MUT, "font-size": 11, "letter-spacing": 3 }, `${D.meta.dateEt} · ET`);
 
   // gross exposure arc (0..cap mapped to 240°), daily-loss arc
   const A0 = -120, SPAN = 240;
   el("path", { d: arc(262, A0, A0 + SPAN), fill: "none", stroke: DIM, "stroke-width": 10 });
   const ge = clamp(D.risk.grossExposure / D.risk.grossCap);
-  if (ge > 0) el("path", { d: arc(262, A0, A0 + SPAN * ge), fill: "none", stroke: BL, "stroke-width": 10 });
+  if (ge > 0) drawOn(el("path", { d: arc(262, A0, A0 + SPAN * ge), fill: "none", stroke: BL, "stroke-width": 10 }), 0.4);
   el("path", { d: arc(246, A0, A0 + SPAN), fill: "none", stroke: DIM, "stroke-width": 4 });
   const dl = clamp(D.risk.dailyLossUsedPct);
-  if (dl > 0) el("path", { d: arc(246, A0, A0 + SPAN * dl), fill: "none", stroke: WARN, "stroke-width": 4 });
+  if (dl > 0) drawOn(el("path", { d: arc(246, A0, A0 + SPAN * dl), fill: "none", stroke: WARN, "stroke-width": 4 }), 0.6);
   const [gx, gy] = pt(262, A0 - 6);
   el("text", { x: gx, y: gy, fill: MUT, "font-size": 10, "text-anchor": "end" }, "EXPOSURE");
 
-  // hourly P&L: 24 radial bars
+  // radar sweep: a bright leading edge with a fading tail, one turn every 6s
+  if (MOTION) spin(group(() => {
+    for (let k = 0; k < 16; k++) {
+      const [x0, y0] = pt(116, -k * 2.2), [x1, y1] = pt(236, -k * 2.2);
+      el("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: CY, "stroke-width": k ? 3 : 1.5,
+                   opacity: k ? (0.22 * (1 - k / 16)).toFixed(3) : 0.9 });
+    }
+  }), 6);
+
+  // hourly P&L: 24 radial bars, growing in one after another on load
   const pnl = D.hourlyPnl24h, maxAbs = Math.max(1, ...pnl.map(Math.abs));
   pnl.forEach((v, i) => {
     const deg = i * 15 + 7.5, len = 4 + 38 * Math.abs(v) / maxAbs;
     const [x0, y0] = pt(190, deg), [x1, y1] = pt(190 + len, deg);
-    el("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: v > 0 ? POS : v < 0 ? NEG : DIM, "stroke-width": 9 });
+    grow(el("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: v > 0 ? POS : v < 0 ? NEG : DIM, "stroke-width": 9 }),
+         x0, y0, x1, y1, 0.3 + i * 0.04);
   });
-  el("circle", { cx: C, cy: C, r: 184, fill: "none", stroke: LN, "stroke-width": 1, "stroke-dasharray": "2 5" });
+  spin(el("circle", { cx: C, cy: C, r: 184, fill: "none", stroke: LN, "stroke-width": 1, "stroke-dasharray": "2 5" }), 40, -1);
 
   // instrument segments ring (enabled = accent, off = dim)
   const n = D.instruments.length, seg = 360 / n;
   D.instruments.forEach((x, i) => {
     const a = i * seg + 4, b2 = (i + 1) * seg - 4;
-    el("path", { d: arc(160, a, b2), fill: "none", stroke: x.enabled ? CY : DIM, "stroke-width": 12 });
+    drawOn(el("path", { d: arc(160, a, b2), fill: "none", stroke: x.enabled ? CY : DIM, "stroke-width": 12 }), 0.2 + i * 0.15, 0.9);
     const [tx, ty] = pt(136, (a + b2) / 2);
     el("text", { x: tx, y: ty + 4, "text-anchor": "middle", fill: x.enabled ? TX : MUT, "font-size": 11 }, x.symbol);
   });
 
-  // core disc
-  el("circle", { cx: C, cy: C, r: 112, fill: "url(#g)", stroke: CY, "stroke-width": 1.5 });
-  el("circle", { cx: C, cy: C, r: 100, fill: "none", stroke: LN, "stroke-width": 1, "stroke-dasharray": "1 3" });
+  // core disc with a heartbeat: a ring that expands and fades every 2.4s
+  if (MOTION) {
+    const halo = el("circle", { cx: C, cy: C, r: 112, fill: "none", stroke: CY, "stroke-width": 2, opacity: 0 });
+    el("animate", { attributeName: "r", values: "112;150", dur: "2.4s", repeatCount: "indefinite" }, null, halo);
+    el("animate", { attributeName: "opacity", values: "0.6;0", dur: "2.4s", repeatCount: "indefinite" }, null, halo);
+  }
+  const disc = el("circle", { cx: C, cy: C, r: 112, fill: "url(#g)", stroke: CY, "stroke-width": 1.5 });
+  if (MOTION) el("animate", { attributeName: "stroke-width", values: "1.5;3;1.5", dur: "2.4s", repeatCount: "indefinite" }, null, disc);
+  spin(el("circle", { cx: C, cy: C, r: 100, fill: "none", stroke: LN, "stroke-width": 1, "stroke-dasharray": "1 3" }), 25);
   const a = D.account;
   el("text", { x: C, y: C - 42, "text-anchor": "middle", fill: MUT, "font-size": 11, "letter-spacing": 4 }, "EQUITY");
-  el("text", { x: C, y: C - 8, "text-anchor": "middle", fill: TX, "font-size": 30, "font-family": "Rajdhani, sans-serif", "font-weight": 700 }, usd(a.equity));
+  const eqText = el("text", { x: C, y: C - 8, "text-anchor": "middle", fill: TX, "font-size": 30, "font-family": "Rajdhani, sans-serif", "font-weight": 700 }, usd(a.equity));
+  if (MOTION) {   // count up from today's starting equity
+    const from = a.startEquityToday, to = a.equity, t0 = performance.now(), dur = 1600;
+    const tick = (now) => {
+      const f = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - f, 3);
+      eqText.textContent = usd(from + (to - from) * e);
+      if (f < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
   el("text", { x: C, y: C + 18, "text-anchor": "middle", fill: a.dayPnl >= 0 ? POS : NEG, "font-size": 14 },
      `${sgnUsd(a.dayPnl)} (${pct(a.dayPnlPct)}) TODAY`);
   el("text", { x: C, y: C + 42, "text-anchor": "middle", fill: CY, "font-size": 11, "letter-spacing": 3 },
