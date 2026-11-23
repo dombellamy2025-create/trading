@@ -277,3 +277,21 @@ alpaca_bot/
 ```
 
 Generated at runtime in the project folder: `trades.csv`, `daily_pnl.csv`, `bot_state.json`, `logs/bot.log`.
+
+## HUD dashboard
+
+`dashboard/hud.html` is a red sci-fi HUD for the bot: account equity and hourly P&L in an animated
+core, bot diagnostics, risk usage, each instrument's live signal and indicators, the backtest, and recent trades.
+
+```bash
+scripts/run_bot.sh                          # bot (auto-restart) + HUD data refresh every 60 s
+python dashboard/update_hud.py              # one live snapshot
+python dashboard/update_hud.py --backtest   # also recompute dashboard/backtest_stats.json
+```
+
+- `update_hud.py` reads the Alpaca account, the bot's process and `logs/bot.log`, `bot_state.json`,
+  `trades.csv` and `backtest_stats.json`, and never places orders.
+- It writes `dashboard/hud_data.js`, which `hud.html` re-reads every 30 s, and `dashboard/hud_live.html`,
+  a self-contained snapshot to open or send. Both are git-ignored.
+- Without `hud_data.js`, the HUD falls back to the `MOCK_DATA` object at the top of `hud.html`.
+  The banner says LIVE or MOCK, and flags live data older than 3 minutes as STALE.

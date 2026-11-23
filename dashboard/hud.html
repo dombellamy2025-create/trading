@@ -4,10 +4,11 @@
 <script>
 /* =====================================================================
    MOCK_DATA: every metric the HUD shows lives here, and only here.
-   The render code below reads from this object and nothing else.
-   Values are seeded from the bot's real state on 2026-11-23 (paper account,
-   BTC/USD + GLD enabled, May-Nov backtest) plus invented intraday activity.
-   To go live later, replace this object with the same shape from an API.
+   The render code below reads only from an object of this shape.
+   LIVE DATA: dashboard/update_hud.py writes the same shape to hud_data.js
+   (window.HUD_DATA), loaded right after this block and re-read every 30 s.
+   MOCK_DATA is the fallback when hud_data.js is missing, and the banner
+   says which one is on screen. Mock values are invented.
    ===================================================================== */
 const MOCK_DATA = {
   meta: {
@@ -50,17 +51,18 @@ const MOCK_DATA = {
     dryRun: false,
     uptimeMin: 35,
     loopSeconds: 30,
-    lastCycleUtc: "02:42:10",
-    cyclesToday: 70,
+    lastLogUtc: "02:42:10",
     apiLatencyMs: 182,
     apiLatencyMaxMs: 1000,
     apiErrors1h: 0,
-    reconnects: 0,
+    reconnects24h: 0,
+    startsToday: 1,
     supervisorRestarts: 0,
     logSizeKb: 4,
     logRotateKb: 5120,
-    apiTraffic: { downKbps: 14.2, upKbps: 1.8, maxKbps: 50 },
-    keepAlive: { schedule: "HOURLY :42", lastCheckUtc: "02:42", result: "OK" },
+    latencySamples: [{ name: "account", ms: 182 }, { name: "clock", ms: 95 }, { name: "positions", ms: 120 },
+                     { name: "orders", ms: 110 }, { name: "price BTC/USD", ms: 140 }, { name: "bars BTC/USD", ms: 310 }],
+    keepAlive: { schedule: "HOURLY :42", lastStartUtc: "02:07" },
   },
 
   risk: {
@@ -131,6 +133,7 @@ const MOCK_DATA = {
   ],
 };
 </script>
+<script src="hud_data.js"></script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Trading HUD</title>
@@ -196,6 +199,8 @@ const MOCK_DATA = {
   .ticks { display: flex; gap: 3px; height: 56px; align-items: flex-end; margin: 8px 0 4px; }
   .ticks i { flex: 1; background: var(--accent); opacity: .85; }
   .ticks i.off { background: var(--line-dim); opacity: 1; }
+  .ticks i.slow { background: var(--warn); }
+  .banner.live { color: var(--pos); border-bottom-color: rgba(63,227,162,.35); }
   .pos { color: var(--pos); } .neg { color: var(--neg); } .warnc { color: var(--warn); } .mut { color: var(--muted); }
 
   .bigbar { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; margin-bottom: 10px; }
@@ -252,8 +257,7 @@ const MOCK_DATA = {
 </main>
 
 <script>
-(() => {
-  const D = MOCK_DATA;
+function render(D, first) {
   const $ = (id) => document.getElementById(id);
   const usd = (v, d = 2) => (v < 0 ? "−$" : "$") + Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
   const sgnUsd = (v) => (v > 0 ? "+" : "") + usd(v);
@@ -264,29 +268,35 @@ const MOCK_DATA = {
   const meter = (f, warn) => `<div class="meter${warn ? " warn" : ""}"><i style="width:${(clamp(f) * 100).toFixed(1)}%"></i></div>`;
 
   /* ---------- banner ---------- */
-  $("banner").textContent = `${D.meta.source} DATA · ${D.meta.mode} · AS OF ${D.meta.asOfUtc}`;
+  const ageMin = (Date.now() - Date.parse(D.meta.asOfUtc.replace(" UTC", "Z").replace(" ", "T"))) / 60000;
+  const stale = D.meta.source === "LIVE" && ageMin > 3;
+  $("banner").textContent = `${D.meta.source} DATA · ${D.meta.mode} · AS OF ${D.meta.asOfUtc}` +
+    (stale ? ` · STALE (${Math.round(ageMin)} MIN OLD)` : "");
+  $("banner").className = "banner" + (D.meta.source === "LIVE" && !stale ? " live" : "");
 
   /* ---------- system diagnostics ---------- */
-  const b = D.bot, tr = b.apiTraffic;
-  const bars = Array.from({ length: 16 }, (_, i) => {
-    const on = i < Math.round(16 * clamp(tr.downKbps / tr.maxKbps));
-    return `<i class="${on ? "" : "off"}" style="height:${30 + (i % 5) * 14}%"></i>`;
-  }).join("");
+  const b = D.bot, samples = b.latencySamples || [];
+  const maxMs = Math.max(b.apiLatencyMaxMs, ...samples.map((x) => x.ms));
+  const bars = samples.map((x) =>
+    `<i class="${x.ms > 500 ? "slow" : ""}" title="${x.name}: ${x.ms} ms" style="height:${Math.max(6, 100 * x.ms / maxMs).toFixed(0)}%"></i>`).join("");
+  const slowest = samples.reduce((a, x) => (x.ms > (a ? a.ms : -1) ? x : a), null);
   $("diag").innerHTML =
     row("BOT", b.running ? "RUNNING" : "STOPPED", b.running ? "pos" : "neg") +
-    row("PROCESS", `PID ${b.pid}`) +
+    row("PROCESS", b.pid ? `PID ${b.pid}` : "—") +
     row("MODE", `${b.paper ? "PAPER" : "LIVE"}${b.dryRun ? " · DRY RUN" : ""}`, b.paper ? "" : "warnc") +
     row("UPTIME", `${b.uptimeMin} MIN`) +
-    row("LOOP", `EVERY ${b.loopSeconds}s · ${b.cyclesToday} CYCLES`) +
-    row("LAST CYCLE", `${b.lastCycleUtc} UTC`) +
-    row("API LATENCY", `${b.apiLatencyMs} ms`) + meter(b.apiLatencyMs / b.apiLatencyMaxMs, b.apiLatencyMs > 500) +
+    row("LOOP", `EVERY ${b.loopSeconds}s`) +
+    row("LAST LOG", `${b.lastLogUtc} UTC`) +
+    row("API LATENCY", b.apiLatencyMs == null ? "—" : `${b.apiLatencyMs} ms`) + meter((b.apiLatencyMs || 0) / b.apiLatencyMaxMs, b.apiLatencyMs > 500) +
     row("API ERRORS 1H", b.apiErrors1h, b.apiErrors1h ? "neg" : "pos") +
-    row("RECONNECTS", b.reconnects, b.reconnects ? "warnc" : "") +
+    row("RECONNECTS 24H", b.reconnects24h, b.reconnects24h ? "warnc" : "") +
+    row("STARTS TODAY", b.startsToday, b.startsToday > 1 ? "warnc" : "") +
     row("SUPERVISOR RESTARTS", b.supervisorRestarts, b.supervisorRestarts ? "warnc" : "") +
     row("LOG", `${b.logSizeKb} KB / ${b.logRotateKb} KB`) +
-    row("KEEP-ALIVE", `${b.keepAlive.schedule} · ${b.keepAlive.lastCheckUtc} ${b.keepAlive.result}`, b.keepAlive.result === "OK" ? "pos" : "neg") +
+    row("KEEP-ALIVE", `${b.keepAlive.schedule} · LAST START ${b.keepAlive.lastStartUtc}`) +
     `<div class="ticks">${bars}</div>` +
-    row("API DOWN", `${tr.downKbps} kbps`) + row("API UP", `${tr.upKbps} kbps`);
+    row("API CALLS", `${samples.length} THIS REFRESH`) +
+    row("SLOWEST", slowest ? `${slowest.name.toUpperCase()} ${slowest.ms} ms` : "—", slowest && slowest.ms > 500 ? "warnc" : "");
 
   /* ---------- risk ---------- */
   const r = D.risk;
@@ -307,7 +317,8 @@ const MOCK_DATA = {
 
   /* ---------- instruments ---------- */
   $("inst").innerHTML = D.instruments.map((x) => {
-    const sigC = x.signal === "BUY" ? "pos" : x.signal === "SELL" ? "neg" : x.signal === "OFF" ? "mut" : "warnc";
+    const sigC = ["LONG", "BUY"].includes(x.signal) ? "pos" : ["SHORT", "SELL", "EXIT"].includes(x.signal) ? "neg"
+               : x.signal === "OFF" ? "mut" : "warnc";
     const ind = Object.entries(x.indicators).map(([k, v]) =>
       `<span class="mut">${k.toUpperCase()}</span><span>${typeof v === "number" ? v.toLocaleString("en-US") : v}</span>`).join("");
     const bt = x.backtest;
@@ -317,9 +328,10 @@ const MOCK_DATA = {
       <div class="top sub"><span>${x.strategy} · ${x.timeframe} · ${x.session}</span>
         <span class="${cls(x.changePct24h || 0)}">${x.changePct24h == null ? "" : pct(x.changePct24h) + " 24H"}</span></div>
       <div class="top" style="margin-top:6px"><span class="chip ${sigC}">${x.signal}</span>
-        <span class="sub">${x.reason}${x.nextSignal ? " · NEXT " + x.nextSignal : ""}</span></div>
+        <span class="sub">${x.signalTimeUtc ? x.signalTimeUtc + " · " : ""}${x.reason}${x.nextSignal ? " · NEXT " + x.nextSignal : ""}</span></div>
       <div class="grid2">
         <span class="mut">POSITION</span><span>${x.side}${x.qty ? " " + x.qty : ""}</span>
+        ${x.unrealizedPl != null ? `<span class="mut">UNREALIZED</span><span class="${cls(x.unrealizedPl)}">${sgnUsd(x.unrealizedPl)}</span>` : ""}
         ${ind}
         <span class="mut">BT SHARPE</span><span class="${cls(bt.sharpe)}">${bt.sharpe.toFixed(2)}</span>
         <span class="mut">BT RETURN</span><span class="${cls(bt.ret)}">${pct(bt.ret)}</span>
@@ -336,9 +348,9 @@ const MOCK_DATA = {
     </table></div>` : `<div class="mut">NO TRADES YET</div>`;
 
   /* ---------- backtest ---------- */
-  const k = D.backtest, p = k.previous;
+  const k = D.backtest, p = k && k.previous;
   const stat = (v, l, prev, c = "") => `<div class="stat"><div class="v ${c}">${v}</div><div class="l">${l}</div>${prev ? `<div class="p">${prev}</div>` : ""}</div>`;
-  $("bt").innerHTML =
+  $("bt").innerHTML = !k ? `<div class="mut">NO BACKTEST STATS: RUN update_hud.py --backtest</div>` :
     `<div class="row" style="margin-bottom:10px"><span class="k">${k.window} · ${k.config}</span><span class="mut">PREVIOUS: ${p.config}</span></div>
     <div class="stats">
       ${stat(pct(k.ret), "RETURN", `WAS ${pct(p.ret)}`, cls(k.ret))}
@@ -354,6 +366,7 @@ const MOCK_DATA = {
 
   /* ---------- central core (SVG) ---------- */
   const NS = "http://www.w3.org/2000/svg", svg = $("core"), C = 320;
+  svg.innerHTML = "";   // rebuilt on every refresh; looping animations stay in phase with the page clock
   let layer = svg;                       // where el() appends; swapped to draw into rotating groups
   const el = (tag, attrs, text, parent = layer) => {
     const e = document.createElementNS(NS, tag);
@@ -368,15 +381,15 @@ const MOCK_DATA = {
   const spin = (node, seconds, dir = 1) => MOTION && el("animateTransform", {
     attributeName: "transform", type: "rotate", from: `0 ${C} ${C}`, to: `${360 * dir} ${C} ${C}`,
     dur: `${seconds}s`, repeatCount: "indefinite" }, null, node);
-  const grow = (line, x0, y0, x1, y1, delay) => {
-    if (!MOTION) return;
+  const grow = (line, x0, y0, x1, y1, delay) => {   // intro only: skipped on refreshes
+    if (!MOTION || !first) return;
     line.setAttribute("x2", x0); line.setAttribute("y2", y0);
     for (const [attr, from, to] of [["x2", x0, x1], ["y2", y0, y1]])
       el("animate", { attributeName: attr, from, to, dur: "0.7s", begin: `${delay}s`, fill: "freeze",
         calcMode: "spline", keySplines: "0.2 0.8 0.2 1", keyTimes: "0;1" }, null, line);
   };
   const drawOn = (path, delay, dur = 1.2) => {
-    if (!MOTION) return;
+    if (!MOTION || !first) return;
     path.setAttribute("pathLength", 1); path.setAttribute("stroke-dasharray", "1 1"); path.setAttribute("stroke-dashoffset", 1);
     el("animate", { attributeName: "stroke-dashoffset", from: 1, to: 0, dur: `${dur}s`, begin: `${delay}s`, fill: "freeze",
       calcMode: "spline", keySplines: "0.3 0.7 0.2 1", keyTimes: "0;1" }, null, path);
@@ -465,7 +478,7 @@ const MOCK_DATA = {
   const a = D.account;
   el("text", { x: C, y: C - 42, "text-anchor": "middle", fill: MUT, "font-size": 11, "letter-spacing": 4 }, "EQUITY");
   const eqText = el("text", { x: C, y: C - 8, "text-anchor": "middle", fill: TX, "font-size": 30, "font-family": "Rajdhani, sans-serif", "font-weight": 700 }, usd(a.equity));
-  if (MOTION) {   // count up from today's starting equity
+  if (MOTION && first) {   // count up from today's starting equity
     const from = a.startEquityToday, to = a.equity, t0 = performance.now(), dur = 1600;
     const tick = (now) => {
       const f = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - f, 3);
@@ -500,7 +513,19 @@ const MOCK_DATA = {
   $("legend").innerHTML =
     `<span><b style="background:${POS}"></b>HOURLY P&amp;L +</span><span><b style="background:${NEG}"></b>HOURLY P&amp;L −</span>` +
     `<span><b style="background:${BL}"></b>GROSS EXPOSURE</span><span><b style="background:${WARN}"></b>DAILY LOSS USED</span>`;
-})();
+}
+
+/* ---------- boot: live data if hud_data.js loaded, else MOCK_DATA; re-read hud_data.js every 30 s ---------- */
+render(window.HUD_DATA || MOCK_DATA, true);
+if (window.HUD_DATA && document.querySelector('script[src="hud_data.js"]')) {
+  setInterval(() => {
+    const tag = document.createElement("script");
+    tag.src = "hud_data.js?t=" + Date.now();
+    tag.onload = () => { render(window.HUD_DATA, false); tag.remove(); };
+    tag.onerror = () => tag.remove();
+    document.head.appendChild(tag);
+  }, 30000);
+}
 </script>
 </body>
 </html>

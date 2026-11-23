@@ -10,3 +10,5 @@ daily_pnl.csv
 .pytest_cache/
 data/
 backtest_trades.csv
+dashboard/hud_data.js
+dashboard/hud_live.html
