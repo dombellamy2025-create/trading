@@ -284,7 +284,7 @@ Generated at runtime in the project folder: `trades.csv`, `daily_pnl.csv`, `bot_
 core, bot diagnostics, risk usage, each instrument's live signal and indicators, the backtest, and recent trades.
 
 ```bash
-scripts/run_bot.sh                          # bot (auto-restart) + HUD data refresh every 60 s
+scripts/run_bot.sh                          # bot (auto-restart) + HUD data refresh every 60 s; extra copies wait on standby (lock files) and take over if the active one dies
 python dashboard/update_hud.py              # one live snapshot
 python dashboard/update_hud.py --backtest   # also recompute dashboard/backtest_stats.json
 ```
