@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="en">
+<head>
+<script>
+/* =====================================================================
+   MOCK_DATA: every metric the HUD shows lives here, and only here.
+   The render code below reads from this object and nothing else.
+   Values are seeded from the bot's real state on 2026-11-23 (paper account,
+   BTC/USD + GLD enabled, May-Nov backtest) plus invented intraday activity.
+   To go live later, replace this object with the same shape from an API.
+   ===================================================================== */
+const MOCK_DATA = {
+  meta: {
+    title: "TRADING HUD",
+    source: "MOCK",                 // shown as a banner while not wired to live data
+    mode: "PAPER",                  // PAPER | LIVE
+    asOfUtc: "2026-11-23 02:42 UTC",
+    clockEt: "21:42",
+    dateEt: "SUN 22 NOV",
+  },
+
+  account: {
+    status: "ACTIVE",
+    equity: 100412.75,
+    cash: 100412.75,
+    buyingPower: 200825.50,
+    startEquityToday: 100000.00,
+    dayPnl: 412.75,
+    dayPnlPct: 0.0041275,
+    realizedToday: 412.75,
+    tradesToday: 1,
+    winsToday: 1,
+    lossesToday: 0,
+    openPositions: 0,
+    openOrders: 0,
+  },
+
+  market: {
+    equitiesOpen: false,
+    cryptoOpen: true,
+    nextOpen: "MON 09:30 ET",
+    nextClose: "MON 16:00 ET",
+    feed: "IEX",
+  },
+
+  bot: {
+    running: true,
+    pid: 889,
+    paper: true,
+    dryRun: false,
+    uptimeMin: 35,
+    loopSeconds: 30,
+    lastCycleUtc: "02:42:10",
+    cyclesToday: 70,
+    apiLatencyMs: 182,
+    apiLatencyMaxMs: 1000,
+    apiErrors1h: 0,
+    reconnects: 0,
+    supervisorRestarts: 0,
+    logSizeKb: 4,
+    logRotateKb: 5120,
+    apiTraffic: { downKbps: 14.2, upKbps: 1.8, maxKbps: 50 },
+    keepAlive: { schedule: "HOURLY :42", lastCheckUtc: "02:42", result: "OK" },
+  },
+
+  risk: {
+    riskPerTrade: 0.01,             // 1-ATR move = 1% of equity
+    hardStopPct: 0.01,
+    maxDailyLoss: 0.03,
+    dailyLossUsedPct: 0.0,          // share of the daily-loss limit used so far
+    grossExposure: 0.0,             // x equity
+    grossCap: 2.0,
+    maxAllocPerSymbol: 1.0,
+    brokerStopsLive: 0,
+    halted: false,
+    correlationBlocksToday: 0,
+  },
+
+  instruments: [
+    {
+      symbol: "BTC/USD", strategy: "MOMENTUM BREAKOUT", timeframe: "1H", session: "24/7",
+      enabled: true, price: 60754.37, changePct24h: 0.0062, side: "FLAT", qty: 0,
+      signal: "HOLD", reason: "NO BREAKOUT", nextSignal: "03:00 UTC",
+      indicators: { high20: 61571.02, low20: 58652.32, volRatio: 0.23, atr: 520.23 },
+      backtest: { trades: 40, winRate: 0.475, sharpe: 1.64, ret: 0.0399, maxDD: -0.0154 },
+    },
+    {
+      symbol: "GLD", strategy: "TREND FOLLOWING", timeframe: "4H", session: "US HOURS",
+      enabled: true, price: 241.86, changePct24h: -0.0031, side: "FLAT", qty: 0,
+      signal: "WAIT", reason: "MARKET CLOSED", nextSignal: "09:30 ET",
+      indicators: { emaFast: 243.10, emaSlow: 246.92, atr: 3.41 },
+      backtest: { trades: 2, winRate: 0.50, sharpe: 0.94, ret: 0.0283, maxDD: -0.0196 },
+    },
+    {
+      symbol: "SPY", strategy: "MEAN REVERSION", timeframe: "15M", session: "US HOURS",
+      enabled: false, price: null, changePct24h: null, side: "OFF", qty: 0,
+      signal: "OFF", reason: "NEGATIVE SHARPE", nextSignal: null, indicators: {},
+      backtest: { trades: 163, winRate: 0.491, sharpe: -3.98, ret: -0.1127, maxDD: -0.1186 },
+    },
+    {
+      symbol: "QQQ", strategy: "MEAN REVERSION", timeframe: "15M", session: "US HOURS",
+      enabled: false, price: null, changePct24h: null, side: "OFF", qty: 0,
+      signal: "OFF", reason: "NEGATIVE SHARPE", nextSignal: null, indicators: {},
+      backtest: { trades: 118, winRate: 0.593, sharpe: -1.21, ret: -0.0377, maxDD: -0.0562 },
+    },
+    {
+      symbol: "USO", strategy: "TREND FOLLOWING", timeframe: "4H", session: "US HOURS",
+      enabled: false, price: null, changePct24h: null, side: "OFF", qty: 0,
+      signal: "OFF", reason: "NEGATIVE SHARPE", nextSignal: null, indicators: {},
+      backtest: { trades: 2, winRate: 0.0, sharpe: -0.99, ret: -0.0187, maxDD: -0.0258 },
+    },
+  ],
+
+  backtest: {
+    window: "2026-05-24 → 2026-11-23",
+    config: "BTC/USD + GLD",
+    startEquity: 100000, endEquity: 106906,
+    ret: 0.0691, sharpe: 1.76, maxDD: -0.0201, maxDDUsd: -2194,
+    trades: 42, winRate: 0.476, profitFactor: 2.28, avgWin: 615, avgLoss: -245,
+    hardStops: 1, dailyHalts: 0, sharpeFirstHalf: 2.51, sharpeSecondHalf: 1.54,
+    previous: { config: "ALL FIVE", ret: -0.1214, sharpe: -1.92, maxDD: -0.1309, trades: 319 },
+  },
+
+  // Last 24 hours, oldest first (hour buckets, New York time).
+  hourlyPnl24h: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 35, -20, 60, 110, -45, 80, 0, 55, -30, 70, 40, 57.75],
+  equityCurve24h: [100000, 100000, 100000, 100000, 100000, 100000, 100000, 100000, 100000, 100000, 100000, 100000,
+                   100035, 100015, 100075, 100185, 100140, 100220, 100220, 100275, 100245, 100315, 100355, 100412.75],
+
+  recentTrades: [
+    { time: "01:00 UTC", symbol: "BTC/USD", side: "LONG", entry: 60120.00, exit: 60755.00, qty: 0.65, pnl: 412.75, reason: "TRAILING STOP" },
+  ],
+};
+</script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trading HUD</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #03070c;
+    --panel: rgba(8, 22, 34, 0.72);
+    --line: #2a7fa8;
+    --line-dim: #123247;
+    --cyan: #49d3ff;
+    --blue: #1f73e0;
+    --text: #d6f3ff;
+    --muted: #6f9db5;
+    --pos: #3fe3a2;
+    --neg: #ff5f6d;
+    --warn: #ffb547;
+    --mono: "Share Tech Mono", ui-monospace, Menlo, Consolas, monospace;
+    --head: "Rajdhani", "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body {
+    font-family: var(--mono); font-size: 13px; min-height: 100vh;
+    background:
+      radial-gradient(ellipse at 50% 45%, rgba(31,115,224,0.16), transparent 60%),
+      var(--bg);
+  }
+  .banner {
+    text-align: center; font-family: var(--head); letter-spacing: .3em; font-size: 11px;
+    color: var(--warn); border-bottom: 1px solid rgba(255,181,71,.35); padding: 4px 16px;
+  }
+  .hud {
+    max-width: 1400px; margin: 0 auto; padding: 16px;
+    display: grid; gap: 16px;
+    grid-template-columns: minmax(260px, 1fr) minmax(360px, 1.5fr) minmax(260px, 1fr);
+    grid-template-areas: "diag core inst" "risk core inst" "bt bt bt" "trades trades trades";
+  }
+  .panel {
+    position: relative; background: var(--panel); border: 1px solid var(--line);
+    padding: 14px 16px 16px;
+    clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 18px 100%, 0 calc(100% - 18px));
+  }
+  .panel::before {
+    content: ""; position: absolute; left: 0; top: 0; width: 46px; height: 3px; background: var(--cyan);
+  }
+  .panel h2 {
+    margin: 0 0 12px; font-family: var(--head); font-weight: 700; font-size: 14px;
+    letter-spacing: .28em; color: var(--cyan);
+  }
+  .hud > * { min-width: 0; }
+  .diag { grid-area: diag; } .risk { grid-area: risk; } .inst { grid-area: inst; }
+  .core { grid-area: core; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .trades { grid-area: trades; } .bt { grid-area: bt; }
+
+  .row { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; flex-wrap: wrap; }
+  .row > span:last-child { text-align: right; margin-left: auto; }
+  .row .k { color: var(--muted); }
+  .meter { height: 6px; background: var(--line-dim); margin: 2px 0 8px; position: relative; }
+  .meter > i { position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, var(--blue), var(--cyan)); }
+  .meter.warn > i { background: linear-gradient(90deg, #b9741a, var(--warn)); }
+  .ticks { display: flex; gap: 3px; height: 56px; align-items: flex-end; margin: 8px 0 4px; }
+  .ticks i { flex: 1; background: var(--cyan); opacity: .85; }
+  .ticks i.off { background: var(--line-dim); opacity: 1; }
+  .pos { color: var(--pos); } .neg { color: var(--neg); } .warnc { color: var(--warn); } .mut { color: var(--muted); }
+
+  .bigbar { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .bigbar .track { height: 22px; border: 1px solid var(--line); position: relative; background: rgba(0,0,0,.3); }
+  .bigbar .track > i { position: absolute; inset: 2px auto 2px 2px; background: var(--blue); }
+  .bigbar .pct { font-family: var(--head); font-weight: 700; font-size: 22px; min-width: 64px; text-align: right; }
+  .bigbar .lab { grid-column: 1 / -1; color: var(--muted); font-size: 11px; letter-spacing: .12em; margin-top: -6px; }
+
+  .card {
+    border: 1px solid var(--line-dim); border-left: 3px solid var(--cyan); padding: 8px 10px; margin-bottom: 10px;
+    background: rgba(0,0,0,.25);
+  }
+  .card.off { border-left-color: var(--line-dim); opacity: .55; }
+  .card .top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .card .sym { font-family: var(--head); font-weight: 700; font-size: 18px; letter-spacing: .08em; }
+  .card .px { font-family: var(--head); font-weight: 700; font-size: 22px; color: var(--cyan); }
+  .card .sub { color: var(--muted); font-size: 11px; letter-spacing: .08em; }
+  .chip { display: inline-block; padding: 1px 6px; border: 1px solid currentColor; font-size: 11px; letter-spacing: .1em; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 14px; margin-top: 6px; font-size: 12px; }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+  .stat { border: 1px solid var(--line-dim); padding: 8px 10px; }
+  .stat .v { font-family: var(--head); font-weight: 700; font-size: 22px; }
+  .stat .l { color: var(--muted); font-size: 11px; letter-spacing: .1em; }
+  .stat .p { color: var(--muted); font-size: 11px; margin-top: 2px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; color: var(--muted); font-weight: normal; letter-spacing: .1em; border-bottom: 1px solid var(--line-dim); padding: 4px 6px 4px 0; }
+  td { white-space: nowrap; padding: 5px 6px 5px 0; border-bottom: 1px solid rgba(18,50,71,.5); }
+  .tablewrap { overflow-x: auto; }
+
+  svg text { font-family: var(--mono); }
+  #core { width: 100%; max-width: 620px; height: auto; }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; color: var(--muted); font-size: 11px; letter-spacing: .08em; }
+  .legend b { display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: -1px; }
+
+  @media (max-width: 1100px) {
+    .hud { grid-template-columns: 1fr 1fr; grid-template-areas: "core core" "diag inst" "risk inst" "bt bt" "trades trades"; }
+  }
+  @media (max-width: 680px) {
+    .hud { padding: 16px; grid-template-columns: 1fr; grid-template-areas: "core" "inst" "risk" "diag" "trades" "bt"; }
+  }
+</style>
+</head>
+<body>
+<div class="banner" id="banner"></div>
+<main class="hud">
+  <section class="panel diag"><h2>SYSTEM DIAGNOSTICS</h2><div id="diag"></div></section>
+  <section class="core"><svg id="core" viewBox="0 -64 640 772" role="img" aria-label="Portfolio core gauge"></svg><div class="legend" id="legend"></div></section>
+  <section class="panel inst"><h2>INSTRUMENTS</h2><div id="inst"></div></section>
+  <section class="panel risk"><h2>RISK STATUS</h2><div id="risk"></div></section>
+  <section class="panel trades"><h2>RECENT TRADES</h2><div id="trades"></div></section>
+  <section class="panel bt"><h2>BACKTEST</h2><div id="bt"></div></section>
+</main>
+
+<script>
+(() => {
+  const D = MOCK_DATA;
+  const $ = (id) => document.getElementById(id);
+  const usd = (v, d = 2) => (v < 0 ? "−$" : "$") + Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+  const sgnUsd = (v) => (v > 0 ? "+" : "") + usd(v);
+  const pct = (v, d = 2) => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v * 100).toFixed(d) + "%";
+  const cls = (v) => (v > 0 ? "pos" : v < 0 ? "neg" : "mut");
+  const clamp = (v) => Math.max(0, Math.min(1, v));
+  const row = (k, v, c = "") => `<div class="row"><span class="k">${k}</span><span class="${c}">${v}</span></div>`;
+  const meter = (f, warn) => `<div class="meter${warn ? " warn" : ""}"><i style="width:${(clamp(f) * 100).toFixed(1)}%"></i></div>`;
+
+  /* ---------- banner ---------- */
+  $("banner").textContent = `${D.meta.source} DATA · ${D.meta.mode} · AS OF ${D.meta.asOfUtc}`;
+
+  /* ---------- system diagnostics ---------- */
+  const b = D.bot, tr = b.apiTraffic;
+  const bars = Array.from({ length: 16 }, (_, i) => {
+    const on = i < Math.round(16 * clamp(tr.downKbps / tr.maxKbps));
+    return `<i class="${on ? "" : "off"}" style="height:${30 + (i % 5) * 14}%"></i>`;
+  }).join("");
+  $("diag").innerHTML =
+    row("BOT", b.running ? "RUNNING" : "STOPPED", b.running ? "pos" : "neg") +
+    row("PROCESS", `PID ${b.pid}`) +
+    row("MODE", `${b.paper ? "PAPER" : "LIVE"}${b.dryRun ? " · DRY RUN" : ""}`, b.paper ? "" : "warnc") +
+    row("UPTIME", `${b.uptimeMin} MIN`) +
+    row("LOOP", `EVERY ${b.loopSeconds}s · ${b.cyclesToday} CYCLES`) +
+    row("LAST CYCLE", `${b.lastCycleUtc} UTC`) +
+    row("API LATENCY", `${b.apiLatencyMs} ms`) + meter(b.apiLatencyMs / b.apiLatencyMaxMs, b.apiLatencyMs > 500) +
+    row("API ERRORS 1H", b.apiErrors1h, b.apiErrors1h ? "neg" : "pos") +
+    row("RECONNECTS", b.reconnects, b.reconnects ? "warnc" : "") +
+    row("SUPERVISOR RESTARTS", b.supervisorRestarts, b.supervisorRestarts ? "warnc" : "") +
+    row("LOG", `${b.logSizeKb} KB / ${b.logRotateKb} KB`) +
+    row("KEEP-ALIVE", `${b.keepAlive.schedule} · ${b.keepAlive.lastCheckUtc} ${b.keepAlive.result}`, b.keepAlive.result === "OK" ? "pos" : "neg") +
+    `<div class="ticks">${bars}</div>` +
+    row("API DOWN", `${tr.downKbps} kbps`) + row("API UP", `${tr.upKbps} kbps`);
+
+  /* ---------- risk ---------- */
+  const r = D.risk;
+  const big = (f, label, warnAt) => {
+    const color = f >= warnAt ? "var(--warn)" : "var(--blue)";
+    return `<div class="bigbar"><div class="track"><i style="width:calc(${(clamp(f) * 100).toFixed(1)}% - 4px);background:${color}"></i></div>
+      <div class="pct">${Math.round(f * 100)}%</div><div class="lab">${label}</div></div>`;
+  };
+  $("risk").innerHTML =
+    big(r.dailyLossUsedPct, `DAILY LOSS LIMIT USED (LIMIT ${(r.maxDailyLoss * 100).toFixed(0)}% EQUITY)`, 0.66) +
+    big(r.grossExposure / r.grossCap, `GROSS EXPOSURE ${r.grossExposure.toFixed(2)}x OF ${r.grossCap.toFixed(1)}x CAP`, 0.8) +
+    row("RISK / TRADE", `${(r.riskPerTrade * 100).toFixed(1)}% EQUITY PER ATR`) +
+    row("HARD STOP", `${(r.hardStopPct * 100).toFixed(1)}% EQUITY`) +
+    row("MAX PER SYMBOL", `${r.maxAllocPerSymbol.toFixed(1)}x EQUITY`) +
+    row("BROKER STOPS LIVE", r.brokerStopsLive) +
+    row("CORRELATION BLOCKS", r.correlationBlocksToday) +
+    row("TRADING", r.halted ? "HALTED" : "ACTIVE", r.halted ? "neg" : "pos");
+
+  /* ---------- instruments ---------- */
+  $("inst").innerHTML = D.instruments.map((x) => {
+    const sigC = x.signal === "BUY" ? "pos" : x.signal === "SELL" ? "neg" : x.signal === "OFF" ? "mut" : "warnc";
+    const ind = Object.entries(x.indicators).map(([k, v]) =>
+      `<span class="mut">${k.toUpperCase()}</span><span>${typeof v === "number" ? v.toLocaleString("en-US") : v}</span>`).join("");
+    const bt = x.backtest;
+    return `<div class="card${x.enabled ? "" : " off"}">
+      <div class="top"><span class="sym">${x.symbol}</span>
+        <span class="px">${x.price == null ? "—" : usd(x.price)}</span></div>
+      <div class="top sub"><span>${x.strategy} · ${x.timeframe} · ${x.session}</span>
+        <span class="${cls(x.changePct24h || 0)}">${x.changePct24h == null ? "" : pct(x.changePct24h) + " 24H"}</span></div>
+      <div class="top" style="margin-top:6px"><span class="chip ${sigC}">${x.signal}</span>
+        <span class="sub">${x.reason}${x.nextSignal ? " · NEXT " + x.nextSignal : ""}</span></div>
+      <div class="grid2">
+        <span class="mut">POSITION</span><span>${x.side}${x.qty ? " " + x.qty : ""}</span>
+        ${ind}
+        <span class="mut">BT SHARPE</span><span class="${cls(bt.sharpe)}">${bt.sharpe.toFixed(2)}</span>
+        <span class="mut">BT RETURN</span><span class="${cls(bt.ret)}">${pct(bt.ret)}</span>
+        <span class="mut">BT TRADES</span><span>${bt.trades} · ${(bt.winRate * 100).toFixed(0)}% WIN</span>
+      </div></div>`;
+  }).join("");
+
+  /* ---------- trades ---------- */
+  const t = D.recentTrades;
+  $("trades").innerHTML = t.length ? `<div class="tablewrap"><table>
+      <tr><th>TIME</th><th>SYMBOL</th><th>SIDE</th><th>ENTRY</th><th>EXIT</th><th>QTY</th><th>P&amp;L</th><th>EXIT REASON</th></tr>
+      ${t.map((x) => `<tr><td>${x.time}</td><td>${x.symbol}</td><td>${x.side}</td><td>${usd(x.entry)}</td>
+        <td>${usd(x.exit)}</td><td>${x.qty}</td><td class="${cls(x.pnl)}">${sgnUsd(x.pnl)}</td><td>${x.reason}</td></tr>`).join("")}
+    </table></div>` : `<div class="mut">NO TRADES YET</div>`;
+
+  /* ---------- backtest ---------- */
+  const k = D.backtest, p = k.previous;
+  const stat = (v, l, prev, c = "") => `<div class="stat"><div class="v ${c}">${v}</div><div class="l">${l}</div>${prev ? `<div class="p">${prev}</div>` : ""}</div>`;
+  $("bt").innerHTML =
+    `<div class="row" style="margin-bottom:10px"><span class="k">${k.window} · ${k.config}</span><span class="mut">PREVIOUS: ${p.config}</span></div>
+    <div class="stats">
+      ${stat(pct(k.ret), "RETURN", `WAS ${pct(p.ret)}`, cls(k.ret))}
+      ${stat(k.sharpe.toFixed(2), "SHARPE", `WAS ${p.sharpe.toFixed(2)}`, cls(k.sharpe))}
+      ${stat(pct(k.maxDD), "MAX DRAWDOWN", `WAS ${pct(p.maxDD)}`, "neg")}
+      ${stat(k.trades, "TRADES", `WAS ${p.trades}`)}
+      ${stat(usd(k.endEquity, 0), "END EQUITY", `FROM ${usd(k.startEquity, 0)}`)}
+      ${stat((k.winRate * 100).toFixed(1) + "%", "WIN RATE")}
+      ${stat(k.profitFactor.toFixed(2), "PROFIT FACTOR", `AVG ${usd(k.avgWin, 0)} / ${usd(k.avgLoss, 0)}`)}
+      ${stat(`${k.sharpeFirstHalf.toFixed(2)} / ${k.sharpeSecondHalf.toFixed(2)}`, "SHARPE H1 / H2")}
+      ${stat(k.hardStops, "HARD STOPS", `${k.dailyHalts} DAILY HALTS`)}
+    </div>`;
+
+  /* ---------- central core (SVG) ---------- */
+  const NS = "http://www.w3.org/2000/svg", svg = $("core"), C = 320;
+  const el = (tag, attrs, text) => {
+    const e = document.createElementNS(NS, tag);
+    for (const a in attrs) e.setAttribute(a, attrs[a]);
+    if (text != null) e.textContent = text;
+    svg.appendChild(e); return e;
+  };
+  const pt = (r, deg) => { const a = (deg - 90) * Math.PI / 180; return [C + r * Math.cos(a), C + r * Math.sin(a)]; };
+  const arc = (r, a0, a1) => {
+    const [x0, y0] = pt(r, a0), [x1, y1] = pt(r, a1);
+    return `M${x0} ${y0} A${r} ${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1} ${y1}`;
+  };
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const CY = css("--cyan"), BL = css("--blue"), DIM = css("--line-dim"), LN = css("--line"),
+        POS = css("--pos"), NEG = css("--neg"), WARN = css("--warn"), MUT = css("--muted"), TX = css("--text");
+
+  const defs = el("defs", {});
+  defs.innerHTML = `<radialGradient id="g" cx="50%" cy="45%" r="60%">
+      <stop offset="0" stop-color="#bfe9ff" stop-opacity=".55"/><stop offset=".35" stop-color="#2a6f9a" stop-opacity=".35"/>
+      <stop offset="1" stop-color="#03070c" stop-opacity="0"/></radialGradient>`;
+
+  // outer tick ring: 120 ticks, every 10th long
+  el("circle", { cx: C, cy: C, r: 300, fill: "none", stroke: LN, "stroke-width": 1 });
+  for (let i = 0; i < 120; i++) {
+    const long = i % 10 === 0, [x0, y0] = pt(300, i * 3), [x1, y1] = pt(long ? 280 : 291, i * 3);
+    el("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: long ? CY : LN, "stroke-width": long ? 2 : 1 });
+  }
+  // clock + session marker at top
+  el("text", { x: C, y: -30, "text-anchor": "middle", fill: TX, "font-size": 26, "letter-spacing": 4 }, D.meta.clockEt);
+  el("text", { x: C, y: -10, "text-anchor": "middle", fill: MUT, "font-size": 11, "letter-spacing": 3 }, `${D.meta.dateEt} · ET`);
+
+  // gross exposure arc (0..cap mapped to 240°), daily-loss arc
+  const A0 = -120, SPAN = 240;
+  el("path", { d: arc(262, A0, A0 + SPAN), fill: "none", stroke: DIM, "stroke-width": 10 });
+  const ge = clamp(D.risk.grossExposure / D.risk.grossCap);
+  if (ge > 0) el("path", { d: arc(262, A0, A0 + SPAN * ge), fill: "none", stroke: BL, "stroke-width": 10 });
+  el("path", { d: arc(246, A0, A0 + SPAN), fill: "none", stroke: DIM, "stroke-width": 4 });
+  const dl = clamp(D.risk.dailyLossUsedPct);
+  if (dl > 0) el("path", { d: arc(246, A0, A0 + SPAN * dl), fill: "none", stroke: WARN, "stroke-width": 4 });
+  const [gx, gy] = pt(262, A0 - 6);
+  el("text", { x: gx, y: gy, fill: MUT, "font-size": 10, "text-anchor": "end" }, "EXPOSURE");
+
+  // hourly P&L: 24 radial bars
+  const pnl = D.hourlyPnl24h, maxAbs = Math.max(1, ...pnl.map(Math.abs));
+  pnl.forEach((v, i) => {
+    const deg = i * 15 + 7.5, len = 4 + 38 * Math.abs(v) / maxAbs;
+    const [x0, y0] = pt(190, deg), [x1, y1] = pt(190 + len, deg);
+    el("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: v > 0 ? CY : v < 0 ? NEG : DIM, "stroke-width": 9 });
+  });
+  el("circle", { cx: C, cy: C, r: 184, fill: "none", stroke: LN, "stroke-width": 1, "stroke-dasharray": "2 5" });
+
+  // instrument segments ring (enabled = cyan, off = dim)
+  const n = D.instruments.length, seg = 360 / n;
+  D.instruments.forEach((x, i) => {
+    const a = i * seg + 4, b2 = (i + 1) * seg - 4;
+    el("path", { d: arc(160, a, b2), fill: "none", stroke: x.enabled ? CY : DIM, "stroke-width": 12 });
+    const [tx, ty] = pt(136, (a + b2) / 2);
+    el("text", { x: tx, y: ty + 4, "text-anchor": "middle", fill: x.enabled ? TX : MUT, "font-size": 11 }, x.symbol);
+  });
+
+  // core disc
+  el("circle", { cx: C, cy: C, r: 112, fill: "url(#g)", stroke: CY, "stroke-width": 1.5 });
+  el("circle", { cx: C, cy: C, r: 100, fill: "none", stroke: LN, "stroke-width": 1, "stroke-dasharray": "1 3" });
+  const a = D.account;
+  el("text", { x: C, y: C - 42, "text-anchor": "middle", fill: MUT, "font-size": 11, "letter-spacing": 4 }, "EQUITY");
+  el("text", { x: C, y: C - 8, "text-anchor": "middle", fill: TX, "font-size": 30, "font-family": "Rajdhani, sans-serif", "font-weight": 700 }, usd(a.equity));
+  el("text", { x: C, y: C + 18, "text-anchor": "middle", fill: a.dayPnl >= 0 ? POS : NEG, "font-size": 14 },
+     `${sgnUsd(a.dayPnl)} (${pct(a.dayPnlPct)}) TODAY`);
+  el("text", { x: C, y: C + 42, "text-anchor": "middle", fill: CY, "font-size": 11, "letter-spacing": 3 },
+     `${D.meta.mode} · ${a.openPositions} POS · ${a.openOrders} ORD`);
+  el("text", { x: C, y: C + 60, "text-anchor": "middle", fill: MUT, "font-size": 10, "letter-spacing": 2 },
+     `BP ${usd(a.buyingPower, 0)}`);
+
+  // status hexagons (top-left of the core, like the reference)
+  const hex = (cx, cy, label, on) => {
+    const pts = Array.from({ length: 6 }, (_, i) => { const t2 = (60 * i - 30) * Math.PI / 180; return `${cx + 20 * Math.cos(t2)},${cy + 20 * Math.sin(t2)}`; }).join(" ");
+    el("polygon", { points: pts, fill: "rgba(8,22,34,.9)", stroke: on ? CY : DIM, "stroke-width": 2 });
+    el("text", { x: cx, y: cy + 4, "text-anchor": "middle", fill: on ? CY : MUT, "font-size": 9 }, label);
+  };
+  hex(26, -34, "EQ", D.market.equitiesOpen);
+  hex(74, -34, "BTC", D.market.cryptoOpen);
+  hex(122, -34, "BOT", D.bot.running);
+
+  // bottom readouts
+  el("text", { x: C, y: 668, "text-anchor": "middle", fill: MUT, "font-size": 11, "letter-spacing": 2 },
+     D.market.equitiesOpen ? `EQUITIES OPEN · CLOSE ${D.market.nextClose}` : `EQUITIES CLOSED · OPEN ${D.market.nextOpen}`);
+  el("text", { x: C, y: 690, "text-anchor": "middle", fill: MUT, "font-size": 10, "letter-spacing": 2 },
+     `REALIZED ${sgnUsd(a.realizedToday)} · ${a.tradesToday} TRADES · ${a.winsToday}W ${a.lossesToday}L`);
+
+  $("legend").innerHTML =
+    `<span><b style="background:${CY}"></b>HOURLY P&amp;L +</span><span><b style="background:${NEG}"></b>HOURLY P&amp;L −</span>` +
+    `<span><b style="background:${BL}"></b>GROSS EXPOSURE</span><span><b style="background:${WARN}"></b>DAILY LOSS USED</span>`;
+})();
+</script>
+</body>
+</html>
