@@ -77,6 +77,8 @@ Operational logs go to `logs/bot.log`, rotated at 5 MB.
 | BTC/USD | Momentum breakout | 1 hour | close > prior 20-bar high, volume ≥ 1.5× 20-bar avg | *not allowed for crypto*: exits the long instead | breakdown below 20-bar low on volume, or **2× ATR** trailing stop |
 | GLD, USO | Trend following | 4 hour | EMA50 crosses above EMA200 | EMA50 crosses below EMA200 | opposite cross, or **3× ATR** trailing stop |
 
+**Enabled by default: BTC/USD and GLD only** (`ENABLED_SYMBOLS` in `.env`). Over the May–Nov 2026 backtest, SPY, QQQ and USO had negative Sharpe ratios at these settings (−3.98, −1.21, −0.99), and no SPY variant tested was positive. BTC/USD + GLD alone returned +6.9% (Sharpe 1.76, max drawdown −2.0%) against −12.1% for all five. To trade all five: `ENABLED_SYMBOLS=SPY,QQQ,BTC/USD,GLD,USO`.
+
 How the rules are applied:
 - **Entries** are judged on the last **closed** bar.
 - **Exits** (return to the moving average, trailing stops) are checked against the latest traded

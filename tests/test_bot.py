@@ -1,6 +1,7 @@
 """Offline tests: strategies, risk manager, portfolio logs, and full bot cycles against a fake broker."""
 from __future__ import annotations
 
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +11,8 @@ import pytest
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+# The tests cover every strategy, whatever subset the live bot trades.
+os.environ["ENABLED_SYMBOLS"] = "SPY,QQQ,BTC/USD,GLD,USO"
 
 from bot import risk_manager as risk  # noqa: E402
 from bot.main import TradingBot  # noqa: E402

@@ -54,7 +54,7 @@ class Instrument:
 ALLOW_SHORT = _env("ALLOW_SHORT", True, bool)
 MR_STOP_STD = _env("MR_STOP_STD", 0.0, float)  # optional mean-reversion stop, 0 = off
 
-INSTRUMENTS: list[Instrument] = [
+ALL_INSTRUMENTS: list[Instrument] = [
     # Strategy 1: mean reversion, 15-min bars, 20-period SMA / std-dev
     Instrument("SPY", AssetClass.STOCK,
                MeanReversion(period=20, entry_std=1.5, stop_std=MR_STOP_STD, allow_short=ALLOW_SHORT)),
@@ -68,6 +68,17 @@ INSTRUMENTS: list[Instrument] = [
     Instrument("GLD", AssetClass.STOCK, TrendFollowing(fast=50, slow=200, atr_mult=3.0, allow_short=ALLOW_SHORT)),
     Instrument("USO", AssetClass.STOCK, TrendFollowing(fast=50, slow=200, atr_mult=3.0, allow_short=ALLOW_SHORT)),
 ]
+
+# Which of ALL_INSTRUMENTS actually trade (and are backtested). Comma-separated symbols.
+# Default BTC/USD + GLD: over the May-Nov 2026 backtest SPY, QQQ and USO had negative Sharpe
+# ratios at these settings, while BTC/USD + GLD alone returned +6.9% (Sharpe 1.76, max DD -2.0%).
+# All five: ENABLED_SYMBOLS=SPY,QQQ,BTC/USD,GLD,USO
+ENABLED_SYMBOLS = [x.strip().upper() for x in _env("ENABLED_SYMBOLS", "BTC/USD,GLD").split(",") if x.strip()]
+_unknown = set(ENABLED_SYMBOLS) - {i.symbol for i in ALL_INSTRUMENTS}
+if _unknown or not ENABLED_SYMBOLS:
+    raise SystemExit(f"ENABLED_SYMBOLS: unknown or empty {sorted(_unknown)}; "
+                     f"choose from {[i.symbol for i in ALL_INSTRUMENTS]}")
+INSTRUMENTS: list[Instrument] = [i for i in ALL_INSTRUMENTS if i.symbol in ENABLED_SYMBOLS]
 
 
 # Correlation filter: (group, blocked). If every symbol in the group is already long,
