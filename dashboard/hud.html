@@ -208,6 +208,17 @@ const MOCK_DATA = {
   .ticks i { flex: 1; background: var(--accent); opacity: .85; }
   .ticks i.off { background: var(--line-dim); opacity: 1; }
   .ticks i.slow { background: var(--warn); }
+  .voicebar { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px 14px;
+    padding: 8px 16px; border-bottom: 1px solid var(--line-dim); font-family: var(--head); letter-spacing: .18em; font-size: 12px; color: var(--muted); }
+  .voicebar button, .voicebar select { font: 600 12px/1 var(--head); letter-spacing: .18em; color: var(--accent);
+    background: rgba(255,59,71,.06); border: 1px solid var(--line); padding: 7px 12px; cursor: pointer; text-transform: uppercase; }
+  .voicebar select { letter-spacing: .05em; max-width: 260px; color: var(--text); background: var(--bg); }
+  .voicebar button:hover { background: rgba(255,59,71,.16); }
+  .voicebar button:focus-visible, .voicebar select:focus-visible, .voicebar input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .voicebar button.on { color: var(--bg); background: var(--accent); }
+  .voicebar label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  .voicebar input { accent-color: var(--accent); }
+  .voicebar .speaking { color: var(--accent); }
   .banner.live { color: var(--pos); border-bottom-color: rgba(63,227,162,.35); }
   .pos { color: var(--pos); } .neg { color: var(--neg); } .warnc { color: var(--warn); } .mut { color: var(--muted); }
 
@@ -255,6 +266,13 @@ const MOCK_DATA = {
 </head>
 <body>
 <div class="banner" id="banner"></div>
+<div class="voicebar" id="voicebar" hidden>
+  <button id="vBrief" type="button" aria-label="Read my data aloud">▶ Brief me</button>
+  <button id="vStop" type="button" hidden>■ Stop</button>
+  <label for="vVoice">Voice</label><select id="vVoice"></select>
+  <label><input id="vAnnounce" type="checkbox"> Announce trades &amp; alerts</label>
+  <span id="vState" aria-live="polite"></span>
+</div>
 <main class="hud">
   <section class="panel diag"><h2>SYSTEM DIAGNOSTICS</h2><div id="diag"></div></section>
   <section class="core"><svg id="core" viewBox="0 -64 640 772" role="img" aria-label="Portfolio core gauge"></svg><div class="legend" id="legend"></div></section>
@@ -266,6 +284,7 @@ const MOCK_DATA = {
 
 <script>
 function render(D, first) {
+  window.__HUD_PREV = window.__HUD_NOW; window.__HUD_NOW = D;
   const $ = (id) => document.getElementById(id);
   const usd = (v, d = 2) => (v < 0 ? "−$" : "$") + Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
   const sgnUsd = (v) => (v > 0 ? "+" : "") + usd(v);
@@ -537,13 +556,125 @@ function render(D, first) {
     `<span><b style="background:${BL}"></b>GROSS EXPOSURE</span><span><b style="background:${WARN}"></b>DAILY LOSS USED</span>`;
 }
 
+/* ---------- voice: reads the data aloud with the browser's speech engine, preferring a female voice ---------- */
+const Voice = (() => {
+  const synth = window.speechSynthesis;
+  if (!synth || !window.SpeechSynthesisUtterance) return { onData() {} };
+  const $ = (id) => document.getElementById(id);
+  const store = { get(k) { try { return localStorage.getItem("hud." + k); } catch { return null; } },
+                  set(k, v) { try { localStorage.setItem("hud." + k, v); } catch {} } };
+  // Names of common female system/browser voices (macOS, iOS, Windows, Chrome, Edge, Android).
+  const FEMALE = /female|samantha|victoria|karen|moira|tessa|fiona|serena|allison|ava|susan|zira|aria|jenny|hazel|libby|sonia|natasha|emma|olivia|michelle|catherine|nicky|kate|joanna|salli|kendra|kimberly|ivy|amy|zoe|siri.*(voice 2|voice 4)|google us english$|google uk english female/i;
+  const MALE = /\bmale\b|daniel|alex|fred|tom|aaron|arthur|oliver|guy|david|mark|james|george|ryan|eric|christopher|brian|matthew|google uk english male/i;
+  let voices = [], chosen = null;
+  const rank = (v) => (FEMALE.test(v.name) && !/\bmale\b/i.test(v.name.replace(/female/i, "")) ? 0 : MALE.test(v.name) ? 2 : 1)
+                     + (/^en(-|_|$)/i.test(v.lang) ? 0 : 3) + (/en[-_](US|GB|AU|IE)/i.test(v.lang) ? 0 : 0.5) + (v.localService ? 0 : 0.2);
+  function loadVoices() {
+    voices = synth.getVoices().slice().sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+    if (!voices.length) return;
+    const saved = store.get("voice");
+    chosen = voices.find((v) => v.name === saved) || voices[0];
+    const sel = $("vVoice");
+    sel.innerHTML = "";
+    voices.forEach((v) => { const o = document.createElement("option"); o.value = v.name;
+      o.textContent = `${v.name} (${v.lang})${rank(v) < 1 ? " ♀" : ""}`; sel.appendChild(o); });
+    sel.value = chosen.name;
+  }
+  loadVoices();
+  synth.addEventListener?.("voiceschanged", loadVoices);
+
+  // ---- speech-friendly numbers
+  const dollars = (v) => { const a = Math.abs(v); return "$" + (a >= 1000 ? Math.round(a).toLocaleString("en-US") : a.toFixed(2)); };
+  const signed = (v) => (v < 0 ? "minus " : v > 0 ? "plus " : "") + dollars(v);
+  const pctS = (v) => (v < 0 ? "minus " : "") + Math.abs(v * 100).toFixed(2) + " percent";
+  const move = (v) => (v < 0 ? "down " : "up ") + Math.abs(v * 100).toFixed(2) + " percent";
+  const DAYS = { MON: "Monday", TUE: "Tuesday", WED: "Wednesday", THU: "Thursday", FRI: "Friday", SAT: "Saturday", SUN: "Sunday" };
+  const when = (t) => String(t || "").replace(/\b(MON|TUE|WED|THU|FRI|SAT|SUN)\b/, (d) => DAYS[d])
+    .replace(/\b0(\d):/, "$1:").replace(/\bET\b/, "Eastern").replace(/\bUTC\b/, "U T C");
+  const sym = (s) => s.replace("BTC/USD", "Bitcoin").replace(/^GLD$/, "G L D").replace(/^USO$/, "U S O").replace(/^SPY$/, "S P Y").replace(/^QQQ$/, "Q Q Q");
+  const lower = (t) => String(t || "").toLowerCase().replace(/\(.*?\)/g, "").trim();
+
+  function brief(D) {
+    const a = D.account, b = D.bot, r = D.risk, L = [];
+    const hr = parseInt((D.meta.clockEt || "12:00").slice(0, 2), 10);
+    L.push(`Good ${hr < 12 ? "morning" : hr < 18 ? "afternoon" : "evening"}. Here is your trading briefing.`);
+    if (D.meta.source !== "LIVE") L.push("Note: this is sample data, not your live account.");
+    const age = (Date.now() - Date.parse(D.meta.asOfUtc.replace(" UTC", "Z").replace(" ", "T"))) / 60000;
+    if (D.meta.source === "LIVE" && age > 3) L.push(`Warning: this data is ${Math.round(age)} minutes old.`);
+    L.push(b.running ? `The ${b.paper ? "paper" : "live"} trading bot is running.` : "Warning: the trading bot is stopped.");
+    L.push(`Equity is ${dollars(a.equity)}, ${a.dayPnl < 0 ? "down" : "up"} ${dollars(a.dayPnl)} today, or ${move(a.dayPnlPct)}.`);
+    if (a.tradesToday) {
+      L.push(`${a.tradesToday} trade${a.tradesToday > 1 ? "s" : ""} closed today: ${a.winsToday} ${a.winsToday === 1 ? "winner" : "winners"}, ${a.lossesToday} ${a.lossesToday === 1 ? "loser" : "losers"}.`);
+      L.push(`Realized profit and loss is ${signed(a.realizedToday)} before fees.`);
+    } else L.push("No trades closed today.");
+    if (a.feesToday != null) L.push(`Fees today: ${dollars(a.feesToday)}. Net realized: ${signed(a.netRealizedToday)}.`);
+    const open = D.instruments.filter((x) => x.side === "LONG" || x.side === "SHORT");
+    if (open.length) open.forEach((x) => L.push(`Open position: ${sym(x.symbol)} ${lower(x.side)}, ${x.qty}` +
+      (x.unrealizedPl != null ? `, unrealized ${signed(x.unrealizedPl)}` : "") + (x.exitFeeEst ? `, about ${dollars(x.exitFeeEst)} in fees to close` : "") + "."));
+    else L.push("No open positions.");
+    D.instruments.filter((x) => x.enabled).forEach((x) => {
+      let t = `${sym(x.symbol)}${x.price != null ? ` is at ${dollars(x.price)}` : ""}`;
+      if (x.changePct24h != null) t += `, ${move(x.changePct24h)} on the day`;
+      t += `. Signal: ${lower(x.signal)}, ${lower(x.reason)}.`;
+      const hh = x.indicators && (x.indicators.high20 ?? x.indicators.hh);
+      if (x.side === "FLAT" && typeof hh === "number" && x.price != null && x.symbol.includes("/")) t += ` The breakout level is ${dollars(hh)}.`;
+      L.push(t);
+    });
+    L.push(r.halted ? "Trading is halted: the daily loss limit was reached." :
+      `Daily loss limit: ${Math.round(r.dailyLossUsedPct * 100)} percent used.`);
+    if (b.apiErrors1h) L.push(`${b.apiErrors1h} API errors in the last hour.`);
+    const t0 = D.recentTrades && D.recentTrades[0];
+    if (t0) L.push(`Last trade: ${sym(t0.symbol)} ${lower(t0.side)} at ${when(t0.time)}, net ${signed(t0.netPnl ?? t0.pnl)}.`);
+    L.push(D.market.equitiesOpen ? `The stock market is open until ${when(D.market.nextClose)}.` : `The stock market is closed until ${when(D.market.nextOpen)}.`);
+    return L.join(" ");
+  }
+
+  function say(text) {
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    if (chosen) { try { u.voice = chosen; } catch {} u.lang = chosen.lang; }
+    u.rate = 1; u.pitch = 1.05;
+    u.onstart = () => { $("vStop").hidden = false; $("vState").textContent = "SPEAKING"; $("vState").className = "speaking"; };
+    u.onend = u.onerror = () => { $("vStop").hidden = true; $("vState").textContent = ""; };
+    synth.speak(u);
+  }
+
+  $("voicebar").hidden = false;
+  $("vBrief").addEventListener("click", () => say(brief(window.__HUD_NOW)));
+  $("vStop").addEventListener("click", () => synth.cancel());
+  $("vVoice").addEventListener("change", (e) => { chosen = voices.find((v) => v.name === e.target.value) || chosen; store.set("voice", chosen.name);
+    say("Voice selected."); });
+  const ann = $("vAnnounce");
+  ann.checked = store.get("announce") === "1";
+  ann.addEventListener("change", () => { store.set("announce", ann.checked ? "1" : "0");
+    if (ann.checked) say("I'll announce new trades and alerts while this page is open."); });
+
+  // ---- announcements on refresh: only changes, only when switched on
+  function onData(D, P) {
+    if (!ann.checked || !P || D.meta.source !== "LIVE") return;
+    const msgs = [];
+    const t0 = D.recentTrades[0], p0 = P.recentTrades[0];
+    if (t0 && (!p0 || t0.time !== p0.time || t0.symbol !== p0.symbol))
+      msgs.push(`Trade closed: ${sym(t0.symbol)} ${lower(t0.side)}, net ${signed(t0.netPnl ?? t0.pnl)}, after ${dollars(t0.fee || 0)} in fees.`);
+    D.instruments.forEach((x) => { const q = P.instruments.find((y) => y.symbol === x.symbol);
+      if (q && q.side !== x.side && (x.side === "LONG" || x.side === "SHORT"))
+        msgs.push(`New position: ${sym(x.symbol)} ${lower(x.side)}, ${x.qty}${x.price != null ? ` near ${dollars(x.price)}` : ""}.`); });
+    if (D.risk.halted && !P.risk.halted) msgs.push("Alert: trading halted. The daily loss limit was reached.");
+    if (!D.bot.running && P.bot.running) msgs.push("Alert: the trading bot has stopped.");
+    if (D.bot.running && !P.bot.running) msgs.push("The trading bot is running again.");
+    if (D.risk.dailyLossUsedPct >= 0.66 && P.risk.dailyLossUsedPct < 0.66) msgs.push("Alert: two thirds of the daily loss limit is used.");
+    if (msgs.length) say(msgs.join(" "));
+  }
+  return { onData };
+})();
+
 /* ---------- boot: live data if hud_data.js loaded, else MOCK_DATA; re-read hud_data.js every 30 s ---------- */
 render(window.HUD_DATA || MOCK_DATA, true);
 if (window.HUD_DATA && document.querySelector('script[src="hud_data.js"]')) {
   setInterval(() => {
     const tag = document.createElement("script");
     tag.src = "hud_data.js?t=" + Date.now();
-    tag.onload = () => { render(window.HUD_DATA, false); tag.remove(); };
+    tag.onload = () => { render(window.HUD_DATA, false); Voice.onData(window.__HUD_NOW, window.__HUD_PREV); tag.remove(); };
     tag.onerror = () => tag.remove();
     document.head.appendChild(tag);
   }, 30000);

@@ -295,3 +295,8 @@ python dashboard/update_hud.py --backtest   # also recompute dashboard/backtest_
   a self-contained snapshot to open or send. Both are git-ignored.
 - Without `hud_data.js`, the HUD falls back to the `MOCK_DATA` object at the top of `hud.html`.
   The banner says LIVE or MOCK, and flags live data older than 3 minutes as STALE.
+- **Voice:** the bar under the banner reads your data aloud. **Brief me** speaks a briefing (bot status, equity
+  and day P&L, fees and net realized P&L, open positions, each instrument's price and signal, daily-loss use,
+  last trade, market hours). **Announce trades & alerts** speaks new trades, new positions, a daily-loss halt,
+  the bot stopping, and two thirds of the loss limit used, as the page refreshes. It uses the browser's own
+  speech engine and picks a female English voice first; change it in the Voice list (remembered per browser).
