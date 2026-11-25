@@ -219,6 +219,27 @@ const MOCK_DATA = {
   .voicebar label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
   .voicebar input { accent-color: var(--accent); }
   .voicebar .speaking { color: var(--accent); }
+  .fname { font-family: var(--head); font-weight: 700; letter-spacing: .4em; color: var(--accent); font-size: 14px; }
+  .friday { max-width: 1400px; margin: 12px auto 0; padding: 0 16px; display: grid; gap: 8px; }
+  .flog { max-height: 190px; overflow-y: auto; border: 1px solid var(--line-dim); background: rgba(20,4,6,.6); padding: 8px 12px;
+    display: grid; gap: 6px; font-size: 13px; color: var(--text); }
+  .msg { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 10px; line-height: 1.45; }
+  .msg b { font-family: var(--head); letter-spacing: .2em; font-size: 11px; color: var(--muted); padding-top: 2px; }
+  .msg.her b { color: var(--accent); }
+  .msg.ignored span { color: var(--muted); text-decoration: line-through; }
+  .msg.hint span { color: var(--muted); }
+  .fform { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-family: var(--head); letter-spacing: .12em; font-size: 12px; color: var(--muted); }
+  .fform input[type=text] { flex: 1 1 240px; min-width: 0; font: 14px var(--head); letter-spacing: .04em; color: var(--text);
+    background: var(--bg); border: 1px solid var(--line); padding: 8px 10px; }
+  .fform button { font: 600 12px/1 var(--head); letter-spacing: .18em; color: var(--accent); background: rgba(255,59,71,.06);
+    border: 1px solid var(--line); padding: 9px 12px; cursor: pointer; text-transform: uppercase; }
+  .fform button:hover { background: rgba(255,59,71,.16); }
+  .fform button.on { color: var(--bg); background: var(--accent); }
+  .fform button:disabled { opacity: .5; cursor: not-allowed; }
+  .fform :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .fform label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+  .fform input[type=checkbox] { accent-color: var(--accent); }
+  .fstate { color: var(--accent); }
   .banner.live { color: var(--pos); border-bottom-color: rgba(63,227,162,.35); }
   .pos { color: var(--pos); } .neg { color: var(--neg); } .warnc { color: var(--warn); } .mut { color: var(--muted); }
 
@@ -267,12 +288,23 @@ const MOCK_DATA = {
 <body>
 <div class="banner" id="banner"></div>
 <div class="voicebar" id="voicebar" hidden>
+  <span class="fname">FRIDAY</span>
   <button id="vBrief" type="button" aria-label="Read my data aloud">▶ Brief me</button>
   <button id="vStop" type="button" hidden>■ Stop</button>
   <label for="vVoice">Voice</label><select id="vVoice"></select>
   <label><input id="vAnnounce" type="checkbox"> Announce trades &amp; alerts</label>
   <span id="vState" aria-live="polite"></span>
 </div>
+<section class="friday" aria-label="Chat with FRIDAY">
+  <div class="flog" id="fLog" role="log" aria-live="polite"></div>
+  <form class="fform" id="fForm" autocomplete="off">
+    <button id="fMic" type="button" aria-label="Listen for the wake word Friday">🎙 Listen</button>
+    <input id="fInput" type="text" placeholder='Type "Friday, …" e.g. Friday, why no trades?' aria-label="Message FRIDAY">
+    <button type="submit">Send</button>
+    <label><input id="fSpeak" type="checkbox" checked> Speak replies</label>
+    <span id="fState" class="fstate" aria-live="polite"></span>
+  </form>
+</section>
 <main class="hud">
   <section class="panel diag"><h2>SYSTEM DIAGNOSTICS</h2><div id="diag"></div></section>
   <section class="core"><svg id="core" viewBox="0 -64 640 772" role="img" aria-label="Portfolio core gauge"></svg><div class="legend" id="legend"></div></section>
@@ -634,8 +666,9 @@ const Voice = (() => {
     const u = new SpeechSynthesisUtterance(text);
     if (chosen) { try { u.voice = chosen; } catch {} u.lang = chosen.lang; }
     u.rate = 1; u.pitch = 1.05;
-    u.onstart = () => { $("vStop").hidden = false; $("vState").textContent = "SPEAKING"; $("vState").className = "speaking"; };
-    u.onend = u.onerror = () => { $("vStop").hidden = true; $("vState").textContent = ""; };
+    const ev = (on) => document.dispatchEvent(new CustomEvent("friday:speaking", { detail: on }));
+    u.onstart = () => { ev(true); $("vStop").hidden = false; $("vState").textContent = "SPEAKING"; $("vState").className = "speaking"; };
+    u.onend = u.onerror = () => { ev(false); $("vStop").hidden = true; $("vState").textContent = ""; };
     synth.speak(u);
   }
 
@@ -665,8 +698,182 @@ const Voice = (() => {
     if (D.risk.dailyLossUsedPct >= 0.66 && P.risk.dailyLossUsedPct < 0.66) msgs.push("Alert: two thirds of the daily loss limit is used.");
     if (msgs.length) say(msgs.join(" "));
   }
-  return { onData };
+  return { onData, say, brief, stop: () => synth.cancel(), h: { dollars, signed, move, sym, lower, when } };
 })();
+
+/* ---------- FRIDAY: chat with the HUD by voice or text. She answers only when addressed by name, from the
+   data on this page, and never places, changes or cancels orders. ---------- */
+const Friday = (() => {
+  const $ = (id) => document.getElementById(id);
+  const H = Voice.h || {};
+  const dollars = H.dollars || ((v) => "$" + Math.abs(v).toFixed(2));
+  const signed = H.signed || ((v) => (v < 0 ? "minus " : "plus ") + dollars(v));
+  const move = H.move || ((v) => (v < 0 ? "down " : "up ") + Math.abs(v * 100).toFixed(2) + " percent");
+  const sym = H.sym || ((s) => s);
+  const lower = H.lower || ((t) => String(t || "").toLowerCase());
+  const when = H.when || ((t) => t);
+  const WAKE = /\b(fri\s?day|frid[ae]y|fryday)\b[\s,.!?:;-]*/i;
+  let armedUntil = 0;   // "Friday" said alone: the next utterance within 8 s is for her
+
+  // ---------- chat log
+  function add(who, text, cls = "") {
+    const row = document.createElement("div");
+    row.className = "msg " + (who === "me" ? "me" : "her") + (cls ? " " + cls : "");
+    const name = document.createElement("b");
+    name.textContent = who === "me" ? "YOU" : "FRIDAY";
+    const body = document.createElement("span");
+    body.textContent = who === "friday" ? text.replace(/\b([A-Z]) ([A-Z]) ([A-Z])\b/g, "$1$2$3") : text;   // "G L D" is for the voice only
+    row.append(name, body);
+    const log = $("fLog");
+    log.appendChild(row);
+    while (log.children.length > 60) log.firstChild.remove();
+    log.scrollTop = log.scrollHeight;
+  }
+  function reply(text) {
+    add("friday", text);
+    if (Voice.say && $("fSpeak").checked) Voice.say(text);
+  }
+
+  // ---------- answers (all from window.__HUD_NOW)
+  const inst = (D, s) => D.instruments.find((x) => x.symbol === s);
+  const ind = (x, ...keys) => { for (const k of keys) if (x.indicators && x.indicators[k] != null) return x.indicators[k]; return null; };
+  const num = (v) => (typeof v === "number" ? v : parseFloat(String(v)));
+  function instLine(x) {
+    if (!x) return "That instrument isn't on the dashboard.";
+    if (!x.enabled) return `${sym(x.symbol)} is switched off. It lost money in the backtest, so the bot doesn't trade it.`;
+    let t = `${sym(x.symbol)} is at ${x.price != null ? dollars(x.price) : "an unknown price"}`;
+    if (x.changePct24h != null) t += `, ${move(x.changePct24h)} on the day`;
+    t += `. Position: ${x.side === "FLAT" ? "none" : lower(x.side) + " " + x.qty}. Signal: ${lower(x.signal)}, ${lower(x.reason)}.`;
+    if (x.nextSignal) t += ` Next check ${when(x.nextSignal)}.`;
+    return t;
+  }
+  function whyNoTrades(D) {
+    const out = [];
+    const b = inst(D, "BTC/USD");
+    if (b && b.enabled) {
+      const hh = num(ind(b, "high20", "hh")), vr = num(ind(b, "vol ratio", "volRatio", "vol"));
+      if (b.side !== "FLAT") out.push(`Bitcoin is already in a ${lower(b.side)} position.`);
+      else if (!isNaN(hh) && b.price != null) {
+        const gap = hh - b.price;
+        out.push(gap > 0
+          ? `Bitcoin needs an hourly close above ${dollars(hh)}, the 20-hour high, on at least 1.5 times normal volume. It's ${dollars(gap)} below that${isNaN(vr) ? "" : `, and volume is running at ${vr.toFixed(2)} times normal`}.`
+          : `Bitcoin is above its 20-hour high${isNaN(vr) ? "" : `; volume is ${vr.toFixed(2)} times normal and needs to be 1.5`}. It's checked at the next hourly close.`);
+      }
+    }
+    const g = inst(D, "GLD");
+    if (g && g.enabled) {
+      const f = num(ind(g, "ema50", "emaFast")), s = num(ind(g, "ema200", "emaSlow"));
+      if (g.side !== "FLAT") out.push(`G L D is already in a ${lower(g.side)} position.`);
+      else if (!isNaN(f) && !isNaN(s)) out.push(`G L D only trades when its 50-period average crosses the 200-period average on 4-hour bars. They're ${dollars(Math.abs(s - f))} apart, with the 50 ${f < s ? "below" : "above"} the 200, so no cross yet.`);
+      if (!D.market.equitiesOpen) out.push(`The stock market is closed until ${when(D.market.nextOpen)}.`);
+    }
+    if (D.risk.halted) out.unshift("Trading is halted for today because the daily loss limit was reached.");
+    return out.length ? out.join(" ") : "No enabled instrument has a signal right now.";
+  }
+
+  const INTENTS = [
+    [/^(stop|quiet|shut up|cancel|never ?mind|be quiet|that's enough)\b/, () => { if (Voice.stop) Voice.stop(); return null; }],
+    [/\b(buy|sell|short)\b|\b(close|exit|liquidate|dump)\b.*\b(position|positions|trade|bitcoin|btc|gold|gld|it|everything|all)\b|\bplace (a |an )?(order|trade)\b|\bopen (a |an )?(position|trade)\b|\bcancel (the |my |all )?orders?\b|\btrade (now|for me)\b/, () =>
+      "I can't place, change or close trades. I only read the data. The bot makes its own trading decisions."],
+    [/\b(help|what can you|commands)\b/, () =>
+      "Ask me for a briefing, your equity, today's profit and loss, fees, open positions, Bitcoin, gold, the last trade, why there are no trades, risk, the market hours, or the bot's health."],
+    [/\b(why|how come)\b.*\b(no|not|any|zero)\b.*\btrad/, whyNoTrades],
+    [/\bwhy\b.*\b(hold|waiting|nothing)\b/, whyNoTrades],
+    [/\b(brief|briefing|update|summary|status report|how are we doing|how('?s| is) it going|rundown)\b/, (D) => Voice.brief ? Voice.brief(D) : "Briefings need speech support in this browser."],
+    [/\b(fee|fees|commission)\b/, (D) => { const a = D.account; return a.feesToday == null ? "Fee data isn't available yet." :
+      `Fees today: ${dollars(a.feesToday)} over ${a.fillsToday} fills. All time: ${dollars(a.feesTotal)}. Crypto costs ${(a.feeRate * 100).toFixed(2)} percent per fill; stocks are free.`; }],
+    [/\b(risk|limit|halt|halted|stop loss|drawdown)\b/, (D) => { const r = D.risk;
+      return `${r.halted ? "Trading is halted for today." : "Trading is active."} ${Math.round(r.dailyLossUsedPct * 100)} percent of the ${(r.maxDailyLoss * 100).toFixed(0)} percent daily loss limit is used. Each trade risks ${(r.riskPerTrade * 100).toFixed(0)} percent of equity per A T R, with a ${(r.hardStopPct * 100).toFixed(0)} percent hard stop.`; }],
+    [/\b(p ?(and|&|n) ?l|pnl|profit|loss|made|lost|today)\b/, (D) => { const a = D.account;
+      return `Today you're ${a.dayPnl < 0 ? "down" : "up"} ${dollars(a.dayPnl)}, or ${move(a.dayPnlPct)}. ${a.tradesToday ? `${a.tradesToday} trade${a.tradesToday > 1 ? "s" : ""} closed, realized ${signed(a.realizedToday)} before fees` : "No trades closed today"}${a.feesToday != null ? `, fees ${dollars(a.feesToday)}, net ${signed(a.netRealizedToday)}` : ""}.`; }],
+    [/\b(equity|balance|account|worth|cash|buying power)\b/, (D) => { const a = D.account;
+      return `Equity is ${dollars(a.equity)}. Cash ${dollars(a.cash)}, buying power ${dollars(a.buyingPower)}. That's ${a.dayPnl < 0 ? "down" : "up"} ${dollars(a.dayPnl)} today.`; }],
+    [/\b(position|positions|holding|holdings|exposure)\b/, (D) => { const o = D.instruments.filter((x) => x.side === "LONG" || x.side === "SHORT");
+      return o.length ? o.map((x) => `${sym(x.symbol)} ${lower(x.side)} ${x.qty}${x.unrealizedPl != null ? `, unrealized ${signed(x.unrealizedPl)}` : ""}`).join(". ") + "."
+        : `No open positions. Gross exposure is ${D.risk.grossExposure.toFixed(2)} times equity.`; }],
+    [/\b(bitcoin|btc|crypto)\b/, (D) => instLine(inst(D, "BTC/USD"))],
+    [/\b(gold|gld)\b/, (D) => instLine(inst(D, "GLD"))],
+    [/\b(oil|uso)\b/, (D) => instLine(inst(D, "USO"))],
+    [/\b(spy|s and p|s ?& ?p)\b/, (D) => instLine(inst(D, "SPY"))],
+    [/\b(qqq|nasdaq)\b/, (D) => instLine(inst(D, "QQQ"))],
+    [/\b(last|latest|recent)\b.*\btrade|\btrades?\b/, (D) => { const t = D.recentTrades[0];
+      return t ? `Last trade: ${sym(t.symbol)} ${lower(t.side)}, closed at ${when(t.time)}. Gross ${signed(t.pnl)}, fees ${dollars(t.fee || 0)}, net ${signed(t.netPnl ?? t.pnl)}. Reason: ${lower(t.reason)}.` : "No trades yet."; }],
+    [/\b(market|open|close|hours)\b/, (D) => D.market.equitiesOpen ? `The stock market is open until ${when(D.market.nextClose)}. Bitcoin trades around the clock.`
+      : `The stock market is closed until ${when(D.market.nextOpen)}. Bitcoin trades around the clock.`],
+    [/\b(strateg(y|ies)|instruments|what.*trading)\b/, (D) => { const on = D.instruments.filter((x) => x.enabled).map((x) => `${sym(x.symbol)}, ${lower(x.strategy)}`);
+      const off = D.instruments.filter((x) => !x.enabled).map((x) => sym(x.symbol));
+      return `Trading ${on.join("; and ")}.${off.length ? ` Switched off: ${off.join(", ")}.` : ""}`; }],
+    [/\b(bot|running|health|alive|uptime|errors?|online)\b/, (D) => { const b = D.bot;
+      return `${b.running ? `The ${b.paper ? "paper" : "live"} bot is running, up ${b.uptimeMin} minutes` : "The bot is stopped"}. ${b.apiErrors1h} API errors in the last hour. Last log line at ${b.lastLogUtc} U T C.`; }],
+    [/\b(backtest|back test)\b/, (D) => { const k = D.backtest; return k ? `Over ${k.window.replace("→", "to")}, ${k.config} returned ${move(k.ret).replace("up", "plus").replace("down", "minus")} after fees, Sharpe ${k.sharpe.toFixed(2)}, max drawdown ${Math.abs(k.maxDD * 100).toFixed(1)} percent.` : "No backtest stats loaded."; }],
+    [/^(hi|hello|hey|yo|are you there|you there|good (morning|afternoon|evening))\b|^$/, (D) =>
+      `I'm here. ${D.bot.running ? "The bot is running" : "The bot is stopped"}, and equity is ${dollars(D.account.equity)}. What do you need?`],
+    [/\b(thanks|thank you|cheers)\b/, () => "Any time."],
+  ];
+
+  function answer(q) {
+    const D = window.__HUD_NOW;
+    const text = q.toLowerCase().replace(/[^\w\s&'?]/g, " ").replace(/\s+/g, " ").trim();
+    for (const [re, fn] of INTENTS) if (re.test(text)) return fn(D);
+    return "I didn't catch that. Ask me for a briefing, equity, profit and loss, fees, positions, Bitcoin, gold, the last trade, or why there are no trades.";
+  }
+
+  // ---------- route a message: only when it's addressed to FRIDAY
+  function handle(raw, fromVoice) {
+    const said = String(raw || "").trim();
+    if (!said) return;
+    const m = said.match(WAKE);
+    const armed = Date.now() < armedUntil;
+    if (!m && !armed) {
+      if (!fromVoice) add("me", said, "ignored");
+      if (!fromVoice) add("friday", "I only answer to my name. Start with \"Friday\".", "hint");
+      return;
+    }
+    armedUntil = 0;
+    add("me", said);
+    const q = m ? said.slice(m.index + m[0].length).trim() : said;
+    if (!q && m) { armedUntil = Date.now() + 8000; reply("Yes?"); return; }
+    const out = answer(q);
+    if (out) reply(out);
+  }
+
+  // ---------- typed chat
+  $("fForm").addEventListener("submit", (e) => { e.preventDefault(); const i = $("fInput"); handle(i.value, false); i.value = ""; });
+
+  // ---------- voice: listen for the wake word
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const mic = $("fMic");
+  if (!SR) { mic.disabled = true; mic.title = "Voice input needs Chrome, Edge or Safari"; mic.textContent = "🎙 Voice N/A"; }
+  let rec = null, listening = false, speaking = false;
+  function setMic(state) { mic.classList.toggle("on", listening); $("fState").textContent = state; }
+  function start() {
+    if (!SR || !listening || speaking || rec) return;
+    rec = new SR();
+    rec.lang = "en-US"; rec.continuous = true; rec.interimResults = false;
+    rec.onresult = (ev) => { for (let i = ev.resultIndex; i < ev.results.length; i++)
+      if (ev.results[i].isFinal) handle(ev.results[i][0].transcript, true); };
+    rec.onerror = (ev) => {
+      if (ev.error === "not-allowed" || ev.error === "service-not-allowed") {
+        listening = false; setMic("MIC BLOCKED: allow microphone access, or open the HUD from http://localhost");
+      }
+    };
+    rec.onend = () => { rec = null; if (listening && !speaking) setTimeout(start, 300); };
+    try { rec.start(); setMic('LISTENING FOR "FRIDAY"'); } catch { rec = null; }
+  }
+  function stopRec() { if (rec) { try { rec.abort(); } catch {} rec = null; } }
+  mic.addEventListener("click", () => {
+    listening = !listening;
+    if (listening) start(); else { stopRec(); setMic(""); }
+  });
+  // don't let FRIDAY hear herself
+  document.addEventListener("friday:speaking", (e) => {
+    speaking = e.detail; if (speaking) stopRec(); else if (listening) setTimeout(start, 400);
+  });
+
+  add("friday", "FRIDAY online. Say or type \"Friday\" followed by a question, like \"Friday, why no trades?\"", "hint");
+  return { handle, answer };
+})();
+
 
 /* ---------- boot: live data if hud_data.js loaded, else MOCK_DATA; re-read hud_data.js every 30 s ---------- */
 render(window.HUD_DATA || MOCK_DATA, true);

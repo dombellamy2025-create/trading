@@ -300,3 +300,8 @@ python dashboard/update_hud.py --backtest   # also recompute dashboard/backtest_
   last trade, market hours). **Announce trades & alerts** speaks new trades, new positions, a daily-loss halt,
   the bot stopping, and two thirds of the loss limit used, as the page refreshes. It uses the browser's own
   speech engine and picks a female English voice first; change it in the Voice list (remembered per browser).
+- **FRIDAY:** the chat panel under the voice bar. She answers only when addressed by name: type or say
+  "Friday, …" (e.g. "Friday, why no trades?", "Friday, how's bitcoin?", "Friday, fees"); saying just "Friday"
+  makes her listen for the next sentence. **Listen** turns on the microphone (Chrome, Edge or Safari; if the
+  browser blocks the mic on a local file, serve the folder with `python3 -m http.server 8765 -d dashboard` and open
+  `http://localhost:8765/hud.html`). Answers come from the HUD's own data; she cannot place, change or close trades.
